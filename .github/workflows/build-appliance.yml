@@ -1,0 +1,77 @@
+name: Build Virtual Appliance
+
+on:
+  push:
+    branches:
+      - "**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    environment: appliance-build
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libguestfs-tools qemu-utils
+
+      - name: Build OVA appliance
+        run: bash appliance/build-appliance.sh
+
+      - name: Capture artifact paths
+        id: files
+        run: |
+          APPLIANCE_FILE="$(ls -1 dist/*.ova | tail -n1)"
+          CHECKSUM_FILE="${APPLIANCE_FILE}.sha256"
+          echo "appliance_file=${APPLIANCE_FILE}" >> "${GITHUB_OUTPUT}"
+          echo "checksum_file=${CHECKSUM_FILE}" >> "${GITHUB_OUTPUT}"
+          echo "appliance_name=$(basename "${APPLIANCE_FILE}")" >> "${GITHUB_OUTPUT}"
+          echo "checksum_name=$(basename "${CHECKSUM_FILE}")" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload build artifact to GitHub
+        uses: actions/upload-artifact@v4
+        with:
+          name: appliance-ova
+          path: |
+            ${{ steps.files.outputs.appliance_file }}
+            ${{ steps.files.outputs.checksum_file }}
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Upload appliance to Azure Blob
+        run: |
+          az storage blob upload \
+            --account-name "${{ vars.AZURE_STORAGE_ACCOUNT }}" \
+            --container-name "${{ vars.AZURE_STORAGE_CONTAINER }}" \
+            --name "${{ steps.files.outputs.appliance_name }}" \
+            --file "${{ steps.files.outputs.appliance_file }}" \
+            --auth-mode login \
+            --overwrite true
+
+          az storage blob upload \
+            --account-name "${{ vars.AZURE_STORAGE_ACCOUNT }}" \
+            --container-name "${{ vars.AZURE_STORAGE_CONTAINER }}" \
+            --name "${{ steps.files.outputs.checksum_name }}" \
+            --file "${{ steps.files.outputs.checksum_file }}" \
+            --auth-mode login \
+            --overwrite true
+
+      - name: Print blob URLs
+        run: |
+          echo "Appliance uploaded:"
+          echo "https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}/${{ steps.files.outputs.appliance_name }}"
+          echo "https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}/${{ steps.files.outputs.checksum_name }}"

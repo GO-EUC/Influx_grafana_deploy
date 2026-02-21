@@ -1,0 +1,13 @@
+[Unit]
+Description=GO-EUC automatic root disk growth
+After=local-fs.target
+ConditionPathExists=/usr/local/bin/go-euc-autogrow.sh
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/go-euc-autogrow.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

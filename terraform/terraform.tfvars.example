@@ -1,0 +1,18 @@
+resource_group_name         = "rg-goeuc-artifacts"
+location                    = "uksouth"
+storage_account_name_prefix = "goeucartifacts"
+storage_container_name      = "appliances"
+
+github_org  = "your-org-or-user"
+github_repo = "Influx_grafana_deploy"
+
+# Optional. If empty, Terraform defaults to:
+# repo:<github_org>/<github_repo>:ref:refs/heads/main
+federated_subjects = [
+  "repo:your-org-or-user/Influx_grafana_deploy:ref:refs/heads/main"
+]
+
+tags = {
+  project = "go-euc"
+  env     = "shared"
+}

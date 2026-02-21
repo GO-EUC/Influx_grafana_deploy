@@ -1,0 +1,11 @@
+[Unit]
+Description=GO-EUC container stack upgrade
+Wants=network-online.target
+After=network-online.target docker.service
+ConditionPathExists=/usr/local/bin/go-euc-upgrade.sh
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/go-euc-upgrade.sh
+StandardOutput=journal
+StandardError=journal

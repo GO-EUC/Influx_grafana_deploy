@@ -1,0 +1,11 @@
+# Terraform local artifacts and output exports
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/terraform.tfstate
+terraform/terraform.tfstate.*
+terraform/crash.log
+terraform/terraform.tfvars
+terraform/outputs.json
+terraform/outputs-*.json
+dist/
+DS_Store

@@ -1,0 +1,15 @@
+[Unit]
+Description=GO-EUC first boot installer
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=!/var/lib/go-euc/.installed
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/go-euc-firstboot.sh
+RemainAfterExit=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

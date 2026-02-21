@@ -1,0 +1,11 @@
+[Unit]
+Description=Run GO-EUC stack upgrade daily
+
+[Timer]
+OnBootSec=15m
+OnUnitActiveSec=24h
+Persistent=true
+Unit=go-euc-upgrade.service
+
+[Install]
+WantedBy=timers.target
