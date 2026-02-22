@@ -160,11 +160,27 @@ cat > "${OVF_PATH}" <<EOF
     </VirtualHardwareSection>
     <ProductSection ovf:class="go-euc">
       <Info>Deployment properties</Info>
-      <Property ovf:key="appliance_name" ovf:type="string" ovf:userConfigurable="true" ovf:label="Appliance Name"/>
-      <Property ovf:key="appliance_net_iface" ovf:type="string" ovf:userConfigurable="true" ovf:label="Network Interface (optional, e.g. ens160)"/>
-      <Property ovf:key="appliance_static_ip_cidr" ovf:type="string" ovf:userConfigurable="true" ovf:label="IP Settings (CIDR, e.g. 192.168.1.50/24)"/>
-      <Property ovf:key="appliance_gateway" ovf:type="string" ovf:userConfigurable="true" ovf:label="Gateway"/>
-      <Property ovf:key="appliance_dns" ovf:type="string" ovf:userConfigurable="true" ovf:label="DNS (comma separated)"/>
+      <Category>Networking</Category>
+      <Property ovf:key="appliance_name" ovf:type="string" ovf:userConfigurable="true">
+        <Label>Appliance Name</Label>
+        <Description>Optional hostname for the appliance VM.</Description>
+      </Property>
+      <Property ovf:key="appliance_net_iface" ovf:type="string" ovf:userConfigurable="true">
+        <Label>Network Interface</Label>
+        <Description>Optional interface name (for example ens160).</Description>
+      </Property>
+      <Property ovf:key="appliance_static_ip_cidr" ovf:type="string" ovf:userConfigurable="true">
+        <Label>IP Settings (CIDR)</Label>
+        <Description>Optional static IPv4 in CIDR format, for example 192.168.1.50/24.</Description>
+      </Property>
+      <Property ovf:key="appliance_gateway" ovf:type="string" ovf:userConfigurable="true">
+        <Label>Gateway</Label>
+        <Description>Optional default gateway IP address.</Description>
+      </Property>
+      <Property ovf:key="appliance_dns" ovf:type="string" ovf:userConfigurable="true">
+        <Label>DNS</Label>
+        <Description>Optional comma-separated DNS servers, for example 1.1.1.1,8.8.8.8.</Description>
+      </Property>
     </ProductSection>
   </VirtualSystem>
 </Envelope>
