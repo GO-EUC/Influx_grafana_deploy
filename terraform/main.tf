@@ -11,7 +11,8 @@ locals {
   storage_name      = substr("${local.normalized_prefix}${random_string.storage_suffix.result}", 0, 24)
 
   default_federated_subjects = [
-    "repo:${var.github_org}/${var.github_repo}:ref:refs/heads/main"
+    "repo:${var.github_org}/${var.github_repo}:ref:refs/heads/main",
+    "repo:${var.github_org}/${var.github_repo}:environment:appliance-build"
   ]
 
   effective_federated_subjects = length(var.federated_subjects) > 0 ? var.federated_subjects : local.default_federated_subjects

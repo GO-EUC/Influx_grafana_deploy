@@ -7,9 +7,11 @@ github_org  = "your-org-or-user"
 github_repo = "Influx_grafana_deploy"
 
 # Optional. If empty, Terraform defaults to:
-# repo:<github_org>/<github_repo>:ref:refs/heads/main
+# - repo:<github_org>/<github_repo>:ref:refs/heads/main
+# - repo:<github_org>/<github_repo>:environment:appliance-build
 federated_subjects = [
-  "repo:your-org-or-user/Influx_grafana_deploy:ref:refs/heads/main"
+  "repo:your-org-or-user/Influx_grafana_deploy:ref:refs/heads/main",
+  "repo:your-org-or-user/Influx_grafana_deploy:environment:appliance-build"
 ]
 
 tags = {
