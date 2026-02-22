@@ -9,6 +9,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUTPUT_DIR="${ROOT_DIR}/dist"
 WORK_DIR="$(mktemp -d /tmp/go-euc-appliance-XXXXXX)"
+VIRT_CUSTOMIZE_LOG="${OUTPUT_DIR}/virt-customize.log"
 
 UBUNTU_IMAGE_URL="${UBUNTU_IMAGE_URL:-https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img}"
 GIT_SHA="${GITHUB_SHA:-local}"
@@ -36,7 +37,16 @@ cp "${WORK_DIR}/base.img" "${QCOW2_PATH}"
 qemu-img resize "${QCOW2_PATH}" "${DISK_SIZE_GB}G"
 
 echo "Injecting installer and first-boot files..."
-sudo virt-customize -a "${QCOW2_PATH}" \
+VIRT_CUSTOMIZE_ARGS=()
+if [[ "${VIRT_CUSTOMIZE_DEBUG:-false}" == "true" ]]; then
+  VIRT_CUSTOMIZE_ARGS+=("-v" "-x")
+  echo "virt-customize debug enabled."
+fi
+
+mkdir -p "${OUTPUT_DIR}"
+
+set -o pipefail
+sudo virt-customize "${VIRT_CUSTOMIZE_ARGS[@]}" -a "${QCOW2_PATH}" \
   --run-command "mkdir -p /opt/go-euc-installer/scripts /etc/go-euc /usr/local/bin /var/lib/go-euc /etc/systemd/system" \
   --copy-in "${ROOT_DIR}/scripts/step1_install_base.sh:/opt/go-euc-installer/scripts" \
   --copy-in "${ROOT_DIR}/Dashboards.zip:/opt/go-euc-installer" \
@@ -59,7 +69,7 @@ growpart:
   ignore_growroot_disabled: false
 resize_rootfs: true
 EOF" \
-  --run-command "truncate -s 0 /etc/machine-id"
+  --run-command "truncate -s 0 /etc/machine-id" 2>&1 | tee "${VIRT_CUSTOMIZE_LOG}"
 
 echo "Converting disk to VMDK for OVA..."
 qemu-img convert -O vmdk -o adapter_type=lsilogic,subformat=streamOptimized "${QCOW2_PATH}" "${VMDK_PATH}"
