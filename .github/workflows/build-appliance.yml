@@ -30,6 +30,8 @@ jobs:
           LIBGUESTFS_DEBUG: "1"
           LIBGUESTFS_TRACE: "1"
           VIRT_CUSTOMIZE_DEBUG: "true"
+          VIRT_CUSTOMIZE_NO_NETWORK: "true"
+          USE_SUDO_FOR_VIRT_CUSTOMIZE: "true"
         run: bash appliance/build-appliance.sh
 
       - name: Capture artifact paths

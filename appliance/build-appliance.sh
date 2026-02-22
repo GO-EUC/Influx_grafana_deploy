@@ -42,6 +42,9 @@ if [[ "${VIRT_CUSTOMIZE_DEBUG:-false}" == "true" ]]; then
   VIRT_CUSTOMIZE_ARGS+=("-v" "-x")
   echo "virt-customize debug enabled."
 fi
+if [[ "${VIRT_CUSTOMIZE_NO_NETWORK:-true}" == "true" ]]; then
+  VIRT_CUSTOMIZE_ARGS+=("--no-network")
+fi
 
 mkdir -p "${OUTPUT_DIR}"
 
