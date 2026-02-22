@@ -65,7 +65,6 @@ ${VIRT_CUSTOMIZE_CMD} "${VIRT_CUSTOMIZE_ARGS[@]}" -a "${QCOW2_PATH}" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-upgrade.sh:/usr/local/bin" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-upgrade.service:/etc/systemd/system" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-upgrade.timer:/etc/systemd/system" \
-  --install "cloud-guest-utils,open-vm-tools" \
   --run-command "chmod +x /usr/local/bin/go-euc-firstboot.sh /usr/local/bin/go-euc-autogrow.sh /usr/local/bin/go-euc-upgrade.sh /opt/go-euc-installer/scripts/step1_install_base.sh" \
   --run-command "ln -sf /etc/systemd/system/go-euc-firstboot.service /etc/systemd/system/multi-user.target.wants/go-euc-firstboot.service" \
   --run-command "ln -sf /etc/systemd/system/go-euc-autogrow.service /etc/systemd/system/multi-user.target.wants/go-euc-autogrow.service" \

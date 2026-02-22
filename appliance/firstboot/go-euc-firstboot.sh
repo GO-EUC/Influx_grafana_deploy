@@ -14,6 +14,35 @@ if [[ -f "${MARKER_FILE}" ]]; then
   exit 0
 fi
 
+ensure_firstboot_prereqs() {
+  # Some CI-built appliances avoid in-image package installs during virt-customize.
+  # Install runtime prerequisites here when available.
+  local need_update="false"
+  local pkgs=()
+
+  if ! command -v growpart >/dev/null 2>&1; then
+    pkgs+=("cloud-guest-utils")
+  fi
+  if ! command -v vmtoolsd >/dev/null 2>&1; then
+    pkgs+=("open-vm-tools")
+  fi
+  if ! command -v xfs_growfs >/dev/null 2>&1; then
+    pkgs+=("xfsprogs")
+  fi
+
+  if [[ "${#pkgs[@]}" -gt 0 ]]; then
+    need_update="true"
+  fi
+
+  if [[ "${need_update}" == "true" ]]; then
+    echo "[firstboot] Installing prerequisite packages: ${pkgs[*]}"
+    apt-get update -y || true
+    apt-get install -y "${pkgs[@]}" || true
+  fi
+
+  systemctl enable --now open-vm-tools >/dev/null 2>&1 || true
+}
+
 read_ovf_property() {
   local key="$1"
   local ovf_xml=""
@@ -84,6 +113,7 @@ if [[ -f "${CONFIG_FILE}" ]]; then
   source "${CONFIG_FILE}"
 fi
 
+ensure_firstboot_prereqs
 load_ovf_properties
 log_detected_ovf_settings
 
