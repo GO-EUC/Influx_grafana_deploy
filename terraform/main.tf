@@ -32,13 +32,14 @@ resource "azurerm_storage_account" "artifacts" {
   account_replication_type      = "LRS"
   min_tls_version               = "TLS1_2"
   public_network_access_enabled = true
+  allow_nested_items_to_be_public = true
   tags                          = var.tags
 }
 
 resource "azurerm_storage_container" "appliances" {
   name                  = var.storage_container_name
   storage_account_name  = azurerm_storage_account.artifacts.name
-  container_access_type = "private"
+  container_access_type = "blob"
 }
 
 resource "azuread_application" "github_actions" {
