@@ -46,7 +46,14 @@ fi
 mkdir -p "${OUTPUT_DIR}"
 
 set -o pipefail
-sudo virt-customize "${VIRT_CUSTOMIZE_ARGS[@]}" -a "${QCOW2_PATH}" \
+VIRT_CUSTOMIZE_CMD="virt-customize"
+if [[ "${EUID}" -eq 0 ]]; then
+  VIRT_CUSTOMIZE_CMD="virt-customize"
+elif command -v sudo >/dev/null 2>&1 && [[ "${USE_SUDO_FOR_VIRT_CUSTOMIZE:-false}" == "true" ]]; then
+  VIRT_CUSTOMIZE_CMD="sudo virt-customize"
+fi
+
+${VIRT_CUSTOMIZE_CMD} "${VIRT_CUSTOMIZE_ARGS[@]}" -a "${QCOW2_PATH}" \
   --run-command "mkdir -p /opt/go-euc-installer/scripts /etc/go-euc /usr/local/bin /var/lib/go-euc /etc/systemd/system" \
   --copy-in "${ROOT_DIR}/scripts/step1_install_base.sh:/opt/go-euc-installer/scripts" \
   --copy-in "${ROOT_DIR}/Dashboards.zip:/opt/go-euc-installer" \
