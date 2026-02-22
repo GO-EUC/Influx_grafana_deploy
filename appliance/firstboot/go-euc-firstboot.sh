@@ -7,8 +7,11 @@ CONFIG_FILE="/etc/go-euc/config.env"
 INSTALLER="/opt/go-euc-installer/scripts/step1_install_base.sh"
 LOCAL_DASHBOARD_ZIP="/opt/go-euc-installer/Dashboards.zip"
 LOG_FILE="/var/log/go-euc-install.log"
+INSTALL_ROOT="/opt/influx-grafana"
+APPLIANCE_CREDS_FILE="${INSTALL_ROOT}/appliance-login.env"
+SUMMARY_FILE="${INSTALL_ROOT}/install-summary.txt"
 
-mkdir -p /var/lib/go-euc /etc/go-euc
+mkdir -p /var/lib/go-euc /etc/go-euc "${INSTALL_ROOT}"
 
 if [[ -f "${MARKER_FILE}" ]]; then
   exit 0
@@ -41,6 +44,108 @@ ensure_firstboot_prereqs() {
   fi
 
   systemctl enable --now open-vm-tools >/dev/null 2>&1 || true
+}
+
+generate_secret() {
+  local length="${1:-20}"
+  local charset='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@%+='
+  local i
+  local output=""
+  for ((i = 0; i < length; i++)); do
+    output+="${charset:RANDOM%${#charset}:1}"
+  done
+  printf '%s' "${output}"
+}
+
+create_appliance_login() {
+  APPLIANCE_LOGIN_USER_RESOLVED="${APPLIANCE_LOGIN_USER:-goeucadmin}"
+  APPLIANCE_LOGIN_PASSWORD_RESOLVED="${APPLIANCE_LOGIN_PASSWORD:-$(generate_secret 20)}"
+
+  if ! id -u "${APPLIANCE_LOGIN_USER_RESOLVED}" >/dev/null 2>&1; then
+    useradd -m -s /bin/bash "${APPLIANCE_LOGIN_USER_RESOLVED}" || true
+  fi
+
+  usermod -aG sudo "${APPLIANCE_LOGIN_USER_RESOLVED}" >/dev/null 2>&1 || true
+  echo "${APPLIANCE_LOGIN_USER_RESOLVED}:${APPLIANCE_LOGIN_PASSWORD_RESOLVED}" | chpasswd
+
+  cat > "${APPLIANCE_CREDS_FILE}" <<EOF
+APPLIANCE_LOGIN_USER='${APPLIANCE_LOGIN_USER_RESOLVED}'
+APPLIANCE_LOGIN_PASSWORD='${APPLIANCE_LOGIN_PASSWORD_RESOLVED}'
+EOF
+  chmod 600 "${APPLIANCE_CREDS_FILE}"
+}
+
+add_login_user_to_docker_group() {
+  if getent group docker >/dev/null 2>&1; then
+    usermod -aG docker "${APPLIANCE_LOGIN_USER_RESOLVED}" >/dev/null 2>&1 || true
+  fi
+}
+
+publish_final_summary() {
+  local saved_portainer_user="<unknown>"
+  local saved_portainer_password="<unknown>"
+  local saved_influx_user="<unknown>"
+  local saved_influx_password="<unknown>"
+  local saved_influx_org="<unknown>"
+  local saved_grafana_user="<unknown>"
+  local saved_grafana_password="<unknown>"
+
+  if [[ -f "${INSTALL_ROOT}/credentials.env" ]]; then
+    # shellcheck source=/dev/null
+    source "${INSTALL_ROOT}/credentials.env"
+    saved_portainer_user="${SAVED_PORTAINER_ADMIN_USER:-<unknown>}"
+    saved_portainer_password="${SAVED_PORTAINER_ADMIN_PASSWORD:-<unknown>}"
+    saved_influx_user="${SAVED_INFLUX_ADMIN_USER:-<unknown>}"
+    saved_influx_password="${SAVED_INFLUX_ADMIN_PASSWORD:-<unknown>}"
+    saved_influx_org="${SAVED_INFLUX_ADMIN_ORG:-<unknown>}"
+    saved_grafana_user="${SAVED_GRAFANA_ADMIN_USER:-<unknown>}"
+    saved_grafana_password="${SAVED_GRAFANA_ADMIN_PASSWORD:-<unknown>}"
+  fi
+
+  local host_ip="<unknown>"
+  host_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  if [[ -z "${host_ip}" ]]; then
+    host_ip="<unknown>"
+  fi
+
+  cat > "${SUMMARY_FILE}" <<EOF
+============================================================
+GO-EUC APPLIANCE SETUP COMPLETE
+============================================================
+Appliance Login
+  Username: ${APPLIANCE_LOGIN_USER_RESOLVED}
+  Password: ${APPLIANCE_LOGIN_PASSWORD_RESOLVED}
+
+Portainer
+  URL:      https://${host_ip}:9443
+  Username: ${saved_portainer_user}
+  Password: ${saved_portainer_password}
+
+InfluxDB
+  URL:      http://${host_ip}:8086
+  Username: ${saved_influx_user}
+  Password: ${saved_influx_password}
+  Org:      ${saved_influx_org}
+
+Grafana
+  URL:      http://${host_ip}:3000
+  Username: ${saved_grafana_user}
+  Password: ${saved_grafana_password}
+
+Credential files
+  ${APPLIANCE_CREDS_FILE}
+  ${INSTALL_ROOT}/credentials.env
+  ${SUMMARY_FILE}
+============================================================
+EOF
+  chmod 600 "${SUMMARY_FILE}"
+
+  cat "${SUMMARY_FILE}" >> "${LOG_FILE}"
+  for tty_dev in /dev/tty1 /dev/console; do
+    if [[ -w "${tty_dev}" ]]; then
+      cat "${SUMMARY_FILE}" > "${tty_dev}" || true
+    fi
+  done
 }
 
 read_ovf_property() {
@@ -114,6 +219,7 @@ if [[ -f "${CONFIG_FILE}" ]]; then
 fi
 
 ensure_firstboot_prereqs
+create_appliance_login
 load_ovf_properties
 log_detected_ovf_settings
 
@@ -196,5 +302,7 @@ if [[ ! -x "${INSTALLER}" ]]; then
 fi
 
 "${INSTALLER}" | tee "${LOG_FILE}"
+add_login_user_to_docker_group
+publish_final_summary
 
 date -u +"%Y-%m-%dT%H:%M:%SZ" > "${MARKER_FILE}"

@@ -177,3 +177,21 @@ This pulls latest images and redeploys:
 Optional automatic upgrades:
 - set `AUTO_UPGRADE_ENABLED=true` in `/etc/go-euc/config.env` before first boot
 - first boot enables `go-euc-upgrade.timer` (daily)
+
+### Credential display on appliance console
+
+When first-boot setup completes, the appliance writes a credential summary to:
+
+- `/dev/tty1` (VM console)
+- `/dev/console`
+- `/opt/influx-grafana/install-summary.txt`
+
+It includes:
+- Appliance login username/password
+- Portainer credentials
+- Influx credentials
+- Grafana credentials
+
+Optional appliance login override:
+- `APPLIANCE_LOGIN_USER`
+- `APPLIANCE_LOGIN_PASSWORD`
