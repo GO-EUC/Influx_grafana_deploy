@@ -22,9 +22,11 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libguestfs-tools qemu-utils
+          sudo apt-get install -y libguestfs-tools qemu-utils passt
 
       - name: Build OVA appliance
+        env:
+          LIBGUESTFS_BACKEND: direct
         run: bash appliance/build-appliance.sh
 
       - name: Capture artifact paths
