@@ -10,6 +10,7 @@ LOG_FILE="/var/log/go-euc-install.log"
 INSTALL_ROOT="/opt/influx-grafana"
 APPLIANCE_CREDS_FILE="${INSTALL_ROOT}/appliance-login.env"
 SUMMARY_FILE="${INSTALL_ROOT}/install-summary.txt"
+LOGIN_BANNER_FILE="/etc/issue"
 
 mkdir -p /var/lib/go-euc /etc/go-euc "${INSTALL_ROOT}"
 
@@ -139,6 +140,10 @@ Credential files
 ============================================================
 EOF
   chmod 600 "${SUMMARY_FILE}"
+
+  # Keep credentials visible at the console login prompt.
+  cp "${SUMMARY_FILE}" "${LOGIN_BANNER_FILE}"
+  chmod 644 "${LOGIN_BANNER_FILE}"
 
   cat "${SUMMARY_FILE}" >> "${LOG_FILE}"
   for tty_dev in /dev/tty1 /dev/console; do
