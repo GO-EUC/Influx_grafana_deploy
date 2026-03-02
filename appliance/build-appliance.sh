@@ -15,6 +15,8 @@ UBUNTU_IMAGE_URL="${UBUNTU_IMAGE_URL:-https://cloud-images.ubuntu.com/noble/curr
 GIT_SHA="${GITHUB_SHA:-local}"
 BUILD_TS="$(date -u +%Y%m%d-%H%M%S)"
 DISK_SIZE_GB="${DISK_SIZE_GB:-100}"
+BREAK_GLASS_USER="${BREAK_GLASS_USER:-recovery}"
+BREAK_GLASS_PASSWORD="${BREAK_GLASS_PASSWORD:-Recover-ChangeMe-Now!}"
 BUILD_ID="${BUILD_TS}-${GIT_SHA:0:8}"
 APPLIANCE_BASENAME="go-euc-appliance-${BUILD_ID}"
 QCOW2_PATH="${WORK_DIR}/${APPLIANCE_BASENAME}.qcow2"
@@ -58,6 +60,26 @@ fi
 
 ${VIRT_CUSTOMIZE_CMD} "${VIRT_CUSTOMIZE_ARGS[@]}" -a "${QCOW2_PATH}" \
   --run-command "mkdir -p /opt/go-euc-installer/scripts /etc/go-euc /usr/local/bin /var/lib/go-euc /etc/systemd/system" \
+  --run-command "id -u ${BREAK_GLASS_USER} >/dev/null 2>&1 || useradd -m -s /bin/bash ${BREAK_GLASS_USER}" \
+  --run-command "echo '${BREAK_GLASS_USER}:${BREAK_GLASS_PASSWORD}' | chpasswd" \
+  --run-command "usermod -aG sudo ${BREAK_GLASS_USER}" \
+  --run-command "chage -d -1 ${BREAK_GLASS_USER}" \
+  --run-command "cat >/etc/go-euc/break-glass.env <<'EOF'
+BREAK_GLASS_USER=${BREAK_GLASS_USER}
+BREAK_GLASS_PASSWORD=${BREAK_GLASS_PASSWORD}
+EOF" \
+  --run-command "chmod 600 /etc/go-euc/break-glass.env" \
+  --run-command "cat >/etc/issue <<'EOF'
+GO-EUC APPLIANCE - INITIALIZING
+
+If setup is still running, log in with break-glass account:
+  username: ${BREAK_GLASS_USER}
+  password: ${BREAK_GLASS_PASSWORD}
+
+First-boot status:
+  sudo systemctl status go-euc-firstboot.service
+  sudo journalctl -u go-euc-firstboot.service -n 200 --no-pager
+EOF" \
   --copy-in "${ROOT_DIR}/scripts/step1_install_base.sh:/opt/go-euc-installer/scripts" \
   --copy-in "${ROOT_DIR}/Dashboards.zip:/opt/go-euc-installer" \
   --copy-in "${ROOT_DIR}/appliance/firstboot/go-euc-firstboot.sh:/usr/local/bin" \

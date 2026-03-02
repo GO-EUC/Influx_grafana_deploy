@@ -156,17 +156,22 @@ EOF
 read_ovf_property() {
   local key="$1"
   local ovf_xml=""
+  if ! command -v vmtoolsd >/dev/null 2>&1; then
+    return 0
+  fi
+
   ovf_xml="$(vmtoolsd --cmd 'info-get guestinfo.ovfEnv' 2>/dev/null || true)"
   if [[ -z "${ovf_xml}" ]]; then
     return 0
   fi
 
-  python3 - "${key}" <<'PY' 2>/dev/null <<<"${ovf_xml}"
+  OVF_XML="${ovf_xml}" python3 -c '
+import os
 import sys
 import xml.etree.ElementTree as ET
 
 want = sys.argv[1]
-data = sys.stdin.read()
+data = os.environ.get("OVF_XML", "")
 if not data.strip():
     print("")
     raise SystemExit(0)
@@ -196,7 +201,7 @@ for elem in root.iter():
         raise SystemExit(0)
 
 print("")
-PY
+' "${key}" 2>/dev/null
 }
 
 load_ovf_properties() {
@@ -209,6 +214,9 @@ load_ovf_properties() {
 }
 
 log_detected_ovf_settings() {
+  if ! command -v vmtoolsd >/dev/null 2>&1; then
+    echo "[firstboot] vmtoolsd not found; OVF/vApp properties unavailable."
+  fi
   echo "[firstboot] OVF properties detected:"
   echo "[firstboot]   appliance_name=${APPLIANCE_NAME:-<not-set>}"
   echo "[firstboot]   appliance_net_iface=${APPLIANCE_NET_IFACE:-<auto-detect>}"

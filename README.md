@@ -195,3 +195,12 @@ It includes:
 Optional appliance login override:
 - `APPLIANCE_LOGIN_USER`
 - `APPLIANCE_LOGIN_PASSWORD`
+
+### Break-glass login
+
+The image includes a fixed recovery account available immediately at first boot:
+
+- Username: `recovery`
+- Password: `Recover-ChangeMe-Now!`
+
+This is intended for emergency access only; rotate or disable after deployment.
