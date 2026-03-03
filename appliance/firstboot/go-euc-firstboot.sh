@@ -17,6 +17,7 @@ PUBLIC_DIR="${INSTALL_ROOT}/public"
 PUBLIC_CONFIG_FILE="${PUBLIC_DIR}/config.txt"
 PUBLIC_INDEX_FILE="${PUBLIC_DIR}/index.html"
 DELETE_CONFIG_BOOTID_FILE="/var/lib/go-euc/delete-config-after-bootid"
+OVF_ENV_FILE="${INSTALL_ROOT}/ovf-env.xml"
 
 mkdir -p /var/lib/go-euc /etc/go-euc "${INSTALL_ROOT}"
 
@@ -268,6 +269,8 @@ read_ovf_property() {
     return 0
   fi
 
+  printf '%s\n' "${ovf_xml}" > "${OVF_ENV_FILE}" || true
+
   OVF_XML="${ovf_xml}" python3 -c '
 import os
 import sys
@@ -299,7 +302,12 @@ for elem in root.iter():
             key_attr = attr_val
         elif la == "value":
             val_attr = attr_val
-    if key_attr == want:
+    key_match = (
+        key_attr == want
+        or key_attr.endswith("." + want)
+        or key_attr.rsplit(".", 1)[-1] == want
+    )
+    if key_match:
         print(val_attr)
         raise SystemExit(0)
 
@@ -308,13 +316,24 @@ print("")
 }
 
 load_ovf_properties() {
+  local tries=30
+  local wait_seconds=2
+  local i
+
   # Values entered during OVA import (vApp/OVF properties).
-  APPLIANCE_NAME="${APPLIANCE_NAME:-$(read_ovf_property appliance_name)}"
-  APPLIANCE_NET_IFACE="${APPLIANCE_NET_IFACE:-$(read_ovf_property appliance_net_iface)}"
-  APPLIANCE_STATIC_IP_CIDR="${APPLIANCE_STATIC_IP_CIDR:-$(read_ovf_property appliance_static_ip_cidr)}"
-  APPLIANCE_NETMASK="${APPLIANCE_NETMASK:-$(read_ovf_property appliance_netmask)}"
-  APPLIANCE_GATEWAY="${APPLIANCE_GATEWAY:-$(read_ovf_property appliance_gateway)}"
-  APPLIANCE_DNS="${APPLIANCE_DNS:-$(read_ovf_property appliance_dns)}"
+  for ((i = 1; i <= tries; i++)); do
+    APPLIANCE_NAME="${APPLIANCE_NAME:-$(read_ovf_property appliance_name)}"
+    APPLIANCE_NET_IFACE="${APPLIANCE_NET_IFACE:-$(read_ovf_property appliance_net_iface)}"
+    APPLIANCE_STATIC_IP_CIDR="${APPLIANCE_STATIC_IP_CIDR:-$(read_ovf_property appliance_static_ip_cidr)}"
+    APPLIANCE_NETMASK="${APPLIANCE_NETMASK:-$(read_ovf_property appliance_netmask)}"
+    APPLIANCE_GATEWAY="${APPLIANCE_GATEWAY:-$(read_ovf_property appliance_gateway)}"
+    APPLIANCE_DNS="${APPLIANCE_DNS:-$(read_ovf_property appliance_dns)}"
+
+    if [[ -n "${APPLIANCE_STATIC_IP_CIDR:-}" || -n "${APPLIANCE_GATEWAY:-}" || -n "${APPLIANCE_DNS:-}" || -n "${APPLIANCE_NAME:-}" ]]; then
+      break
+    fi
+    sleep "${wait_seconds}"
+  done
 }
 
 log_detected_ovf_settings() {
@@ -328,6 +347,7 @@ log_detected_ovf_settings() {
   echo "[firstboot]   appliance_netmask=${APPLIANCE_NETMASK:-<not-set>}"
   echo "[firstboot]   appliance_gateway=${APPLIANCE_GATEWAY:-<not-set>}"
   echo "[firstboot]   appliance_dns=${APPLIANCE_DNS:-<not-set>}"
+  echo "[firstboot]   ovf_env_file=${OVF_ENV_FILE}"
 }
 
 detect_primary_interface() {
