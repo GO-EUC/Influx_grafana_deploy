@@ -196,6 +196,11 @@ Optional appliance login override:
 - `APPLIANCE_LOGIN_USER`
 - `APPLIANCE_LOGIN_PASSWORD`
 
+The login banner (`/etc/issue`) now shows:
+- `INITIALIZING` during provisioning
+- `COMPLETE` with runtime network details after provisioning
+- `FAILED` with error context if provisioning exits unexpectedly
+
 ### Break-glass login
 
 The image includes a fixed recovery account available immediately at first boot:
@@ -204,3 +209,7 @@ The image includes a fixed recovery account available immediately at first boot:
 - Password: `Recover-ChangeMe-Now!`
 
 This is intended for emergency access only; rotate or disable after deployment.
+
+Optional override values:
+- `BREAK_GLASS_USER`
+- `BREAK_GLASS_PASSWORD`
