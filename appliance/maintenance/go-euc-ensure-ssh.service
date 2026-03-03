@@ -1,0 +1,14 @@
+[Unit]
+Description=GO-EUC ensure SSH availability
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/usr/local/bin/go-euc-ensure-ssh.sh
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/go-euc-ensure-ssh.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -91,11 +91,14 @@ EOF" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-upgrade.service:/etc/systemd/system" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-upgrade.timer:/etc/systemd/system" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-webfiles.service:/etc/systemd/system" \
+  --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-ensure-ssh.sh:/usr/local/bin" \
+  --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-ensure-ssh.service:/etc/systemd/system" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-postsetup-cleanup.sh:/usr/local/bin" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-postsetup-cleanup.service:/etc/systemd/system" \
-  --run-command "chmod +x /usr/local/bin/go-euc-firstboot.sh /usr/local/bin/go-euc-autogrow.sh /usr/local/bin/go-euc-upgrade.sh /usr/local/bin/go-euc-postsetup-cleanup.sh /opt/go-euc-installer/scripts/step1_install_base.sh" \
+  --run-command "chmod +x /usr/local/bin/go-euc-firstboot.sh /usr/local/bin/go-euc-autogrow.sh /usr/local/bin/go-euc-upgrade.sh /usr/local/bin/go-euc-ensure-ssh.sh /usr/local/bin/go-euc-postsetup-cleanup.sh /opt/go-euc-installer/scripts/step1_install_base.sh" \
   --run-command "ln -sf /etc/systemd/system/go-euc-firstboot.service /etc/systemd/system/multi-user.target.wants/go-euc-firstboot.service" \
   --run-command "ln -sf /etc/systemd/system/go-euc-autogrow.service /etc/systemd/system/multi-user.target.wants/go-euc-autogrow.service" \
+  --run-command "ln -sf /etc/systemd/system/go-euc-ensure-ssh.service /etc/systemd/system/multi-user.target.wants/go-euc-ensure-ssh.service" \
   --run-command "ln -sf /etc/systemd/system/go-euc-postsetup-cleanup.service /etc/systemd/system/multi-user.target.wants/go-euc-postsetup-cleanup.service" \
   --run-command "cat >/etc/cloud/cloud.cfg.d/99-go-euc-growpart.cfg <<'EOF'
 growpart:

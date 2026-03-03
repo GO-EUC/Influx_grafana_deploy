@@ -81,6 +81,7 @@ This repository now includes an automated OVA appliance build and publish flow.
   - supports appliance identity/network config from `/etc/go-euc/config.env`
   - includes cloud-init growpart config so root filesystem can expand when virtual disk grows
   - includes `go-euc-autogrow.service` for boot-time fallback resize of root partition/filesystem
+  - includes `go-euc-ensure-ssh.service` to keep SSH available even if provisioning fails
 
 ### Build script (local/manual)
 
