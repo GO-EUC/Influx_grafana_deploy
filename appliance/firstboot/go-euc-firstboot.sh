@@ -95,6 +95,9 @@ ensure_firstboot_prereqs() {
   if ! command -v xfs_growfs >/dev/null 2>&1; then
     pkgs+=("xfsprogs")
   fi
+  if ! command -v sshd >/dev/null 2>&1; then
+    pkgs+=("openssh-server")
+  fi
 
   if [[ "${#pkgs[@]}" -gt 0 ]]; then
     need_update="true"
@@ -152,6 +155,22 @@ add_login_user_to_docker_group() {
   if getent group docker >/dev/null 2>&1; then
     usermod -aG docker "${APPLIANCE_LOGIN_USER_RESOLVED}" >/dev/null 2>&1 || true
   fi
+}
+
+configure_ssh_access() {
+  if ! command -v sshd >/dev/null 2>&1; then
+    return 0
+  fi
+
+  # Ensure password-based SSH works for break-glass and appliance users.
+  sed -i 's/^[#[:space:]]*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config || true
+  if ! grep -q '^PasswordAuthentication yes' /etc/ssh/sshd_config; then
+    echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
+  fi
+  sed -i 's/^[#[:space:]]*KbdInteractiveAuthentication.*/KbdInteractiveAuthentication no/' /etc/ssh/sshd_config || true
+
+  systemctl enable --now ssh >/dev/null 2>&1 || true
+  systemctl restart ssh >/dev/null 2>&1 || true
 }
 
 publish_final_summary() {
@@ -308,7 +327,7 @@ for elem in root.iter():
         or key_attr.rsplit(".", 1)[-1] == want
     )
     if key_match:
-        print(val_attr)
+        print(val_attr.strip())
         raise SystemExit(0)
 
 print("")
@@ -352,11 +371,22 @@ log_detected_ovf_settings() {
 
 detect_primary_interface() {
   local iface=""
+  local candidate=""
   iface="$(ip route 2>/dev/null | awk '/^default/ {print $5; exit}')"
   if [[ -n "${iface}" ]]; then
     printf '%s' "${iface}"
     return 0
   fi
+
+  # Prefer first interface with carrier up.
+  for candidate in /sys/class/net/*; do
+    candidate="$(basename "${candidate}")"
+    [[ "${candidate}" == "lo" ]] && continue
+    if [[ -r "/sys/class/net/${candidate}/carrier" ]] && [[ "$(cat "/sys/class/net/${candidate}/carrier" 2>/dev/null)" == "1" ]]; then
+      printf '%s' "${candidate}"
+      return 0
+    fi
+  done
 
   iface="$(ip -o link show 2>/dev/null | awk -F': ' '$2 != "lo" {print $2; exit}')"
   printf '%s' "${iface}"
@@ -493,6 +523,7 @@ create_appliance_login
 write_issue_status "INITIALIZING" "Bootstrapping appliance and applying imported OVA settings."
 bootstrap_dhcp_network
 ensure_firstboot_prereqs
+configure_ssh_access
 load_ovf_properties
 log_detected_ovf_settings
 
