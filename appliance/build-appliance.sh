@@ -90,9 +90,13 @@ EOF" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-upgrade.sh:/usr/local/bin" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-upgrade.service:/etc/systemd/system" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-upgrade.timer:/etc/systemd/system" \
-  --run-command "chmod +x /usr/local/bin/go-euc-firstboot.sh /usr/local/bin/go-euc-autogrow.sh /usr/local/bin/go-euc-upgrade.sh /opt/go-euc-installer/scripts/step1_install_base.sh" \
+  --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-webfiles.service:/etc/systemd/system" \
+  --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-postsetup-cleanup.sh:/usr/local/bin" \
+  --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-postsetup-cleanup.service:/etc/systemd/system" \
+  --run-command "chmod +x /usr/local/bin/go-euc-firstboot.sh /usr/local/bin/go-euc-autogrow.sh /usr/local/bin/go-euc-upgrade.sh /usr/local/bin/go-euc-postsetup-cleanup.sh /opt/go-euc-installer/scripts/step1_install_base.sh" \
   --run-command "ln -sf /etc/systemd/system/go-euc-firstboot.service /etc/systemd/system/multi-user.target.wants/go-euc-firstboot.service" \
   --run-command "ln -sf /etc/systemd/system/go-euc-autogrow.service /etc/systemd/system/multi-user.target.wants/go-euc-autogrow.service" \
+  --run-command "ln -sf /etc/systemd/system/go-euc-postsetup-cleanup.service /etc/systemd/system/multi-user.target.wants/go-euc-postsetup-cleanup.service" \
   --run-command "cat >/etc/cloud/cloud.cfg.d/99-go-euc-growpart.cfg <<'EOF'
 growpart:
   mode: auto
@@ -194,6 +198,10 @@ cat > "${OVF_PATH}" <<EOF
       <Property ovf:key="appliance_static_ip_cidr" ovf:type="string" ovf:userConfigurable="true">
         <Label>IP Settings (CIDR)</Label>
         <Description>Optional static IPv4 in CIDR format, for example 192.168.1.50/24.</Description>
+      </Property>
+      <Property ovf:key="appliance_netmask" ovf:type="string" ovf:userConfigurable="true">
+        <Label>Netmask (optional)</Label>
+        <Description>Optional netmask (for example 255.255.255.0) if IP is provided without CIDR prefix.</Description>
       </Property>
       <Property ovf:key="appliance_gateway" ovf:type="string" ovf:userConfigurable="true">
         <Label>Gateway</Label>

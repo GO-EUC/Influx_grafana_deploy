@@ -13,6 +13,10 @@ SUMMARY_FILE="${INSTALL_ROOT}/install-summary.txt"
 LOGIN_BANNER_FILE="/etc/issue"
 BOOTSTRAP_NETPLAN_FILE="/etc/netplan/01-go-euc-bootstrap-dhcp.yaml"
 STATIC_NETPLAN_FILE="/etc/netplan/99-go-euc-appliance.yaml"
+PUBLIC_DIR="${INSTALL_ROOT}/public"
+PUBLIC_CONFIG_FILE="${PUBLIC_DIR}/config.txt"
+PUBLIC_INDEX_FILE="${PUBLIC_DIR}/index.html"
+DELETE_CONFIG_BOOTID_FILE="/var/lib/go-euc/delete-config-after-bootid"
 
 mkdir -p /var/lib/go-euc /etc/go-euc "${INSTALL_ROOT}"
 
@@ -221,6 +225,35 @@ EOF
   net_info="Setup complete. Hostname=${RUNTIME_HOSTNAME}, Interface=${RUNTIME_IFACE}, IP=${RUNTIME_IP}, Gateway=${RUNTIME_GATEWAY}, DNS=${RUNTIME_DNS}"
   write_issue_status "COMPLETE" "${net_info}"
   cat "${SUMMARY_FILE}" >> "${LOGIN_BANNER_FILE}"
+
+  cat > "${PUBLIC_CONFIG_FILE}" <<EOF
+GO-EUC APPLIANCE CONFIG
+
+Appliance Login
+Username=${APPLIANCE_LOGIN_USER_RESOLVED}
+Password=${APPLIANCE_LOGIN_PASSWORD_RESOLVED}
+
+Break Glass
+Username=${BREAK_GLASS_USER_RESOLVED}
+Password=${BREAK_GLASS_PASSWORD_RESOLVED}
+
+Portainer
+Username=${saved_portainer_user}
+Password=${saved_portainer_password}
+
+InfluxDB
+Username=${saved_influx_user}
+Password=${saved_influx_password}
+Org=${saved_influx_org}
+
+Grafana
+Username=${saved_grafana_user}
+Password=${saved_grafana_password}
+EOF
+  chmod 644 "${PUBLIC_CONFIG_FILE}"
+
+  cat /proc/sys/kernel/random/boot_id > "${DELETE_CONFIG_BOOTID_FILE}"
+  chmod 600 "${DELETE_CONFIG_BOOTID_FILE}"
 }
 
 read_ovf_property() {
@@ -279,6 +312,7 @@ load_ovf_properties() {
   APPLIANCE_NAME="${APPLIANCE_NAME:-$(read_ovf_property appliance_name)}"
   APPLIANCE_NET_IFACE="${APPLIANCE_NET_IFACE:-$(read_ovf_property appliance_net_iface)}"
   APPLIANCE_STATIC_IP_CIDR="${APPLIANCE_STATIC_IP_CIDR:-$(read_ovf_property appliance_static_ip_cidr)}"
+  APPLIANCE_NETMASK="${APPLIANCE_NETMASK:-$(read_ovf_property appliance_netmask)}"
   APPLIANCE_GATEWAY="${APPLIANCE_GATEWAY:-$(read_ovf_property appliance_gateway)}"
   APPLIANCE_DNS="${APPLIANCE_DNS:-$(read_ovf_property appliance_dns)}"
 }
@@ -291,6 +325,7 @@ log_detected_ovf_settings() {
   echo "[firstboot]   appliance_name=${APPLIANCE_NAME:-<not-set>}"
   echo "[firstboot]   appliance_net_iface=${APPLIANCE_NET_IFACE:-<auto-detect>}"
   echo "[firstboot]   appliance_static_ip_cidr=${APPLIANCE_STATIC_IP_CIDR:-<not-set>}"
+  echo "[firstboot]   appliance_netmask=${APPLIANCE_NETMASK:-<not-set>}"
   echo "[firstboot]   appliance_gateway=${APPLIANCE_GATEWAY:-<not-set>}"
   echo "[firstboot]   appliance_dns=${APPLIANCE_DNS:-<not-set>}"
 }
@@ -347,13 +382,51 @@ apply_hostname_config() {
 
 apply_network_config() {
   local static_ip="${APPLIANCE_STATIC_IP_CIDR:-}"
+  local netmask="${APPLIANCE_NETMASK:-}"
   local gateway="${APPLIANCE_GATEWAY:-}"
   local dns_csv="${APPLIANCE_DNS:-}"
   local iface="${APPLIANCE_NET_IFACE:-$(detect_primary_interface)}"
   local dns_yaml=""
+  local prefix=""
 
   if [[ -z "${static_ip}" || -z "${iface}" ]]; then
     return 0
+  fi
+
+  if [[ "${static_ip}" != */* ]]; then
+    if [[ -n "${netmask}" ]]; then
+      case "${netmask}" in
+        255.255.255.255) prefix="32" ;;
+        255.255.255.254) prefix="31" ;;
+        255.255.255.252) prefix="30" ;;
+        255.255.255.248) prefix="29" ;;
+        255.255.255.240) prefix="28" ;;
+        255.255.255.224) prefix="27" ;;
+        255.255.255.192) prefix="26" ;;
+        255.255.255.128) prefix="25" ;;
+        255.255.255.0) prefix="24" ;;
+        255.255.254.0) prefix="23" ;;
+        255.255.252.0) prefix="22" ;;
+        255.255.248.0) prefix="21" ;;
+        255.255.240.0) prefix="20" ;;
+        255.255.224.0) prefix="19" ;;
+        255.255.192.0) prefix="18" ;;
+        255.255.128.0) prefix="17" ;;
+        255.255.0.0) prefix="16" ;;
+        255.254.0.0) prefix="15" ;;
+        255.252.0.0) prefix="14" ;;
+        255.248.0.0) prefix="13" ;;
+        255.240.0.0) prefix="12" ;;
+        255.224.0.0) prefix="11" ;;
+        255.192.0.0) prefix="10" ;;
+        255.128.0.0) prefix="9" ;;
+        255.0.0.0) prefix="8" ;;
+        *) prefix="24" ;;
+      esac
+    else
+      prefix="24"
+    fi
+    static_ip="${static_ip}/${prefix}"
   fi
 
   if [[ -n "${dns_csv}" ]]; then
@@ -386,8 +459,8 @@ EOF
   fi
 
   rm -f "${BOOTSTRAP_NETPLAN_FILE}" || true
-  netplan generate || true
-  netplan apply || true
+  netplan generate
+  netplan apply
 }
 
 # Optional local override file (takes precedence over OVF if set).
@@ -413,9 +486,25 @@ configure_upgrade_timer() {
   fi
 }
 
+configure_web_file_host() {
+  mkdir -p "${PUBLIC_DIR}"
+
+  cat > "${PUBLIC_INDEX_FILE}" <<EOF
+GO-EUC appliance file host
+
+Available files:
+- config.txt (contains setup credentials; removed on first reboot post-setup)
+EOF
+  chmod 644 "${PUBLIC_INDEX_FILE}"
+
+  systemctl daemon-reload || true
+  systemctl enable --now go-euc-webfiles.service || true
+}
+
 apply_hostname_config
 apply_network_config
 configure_upgrade_timer
+configure_web_file_host
 
 # In appliance mode we always use the baked-in dashboard bundle.
 if [[ -f "${INSTALLER}" && -f "${LOCAL_DASHBOARD_ZIP}" ]]; then

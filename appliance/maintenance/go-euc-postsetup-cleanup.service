@@ -1,0 +1,13 @@
+[Unit]
+Description=GO-EUC post-setup cleanup
+After=local-fs.target
+ConditionPathExists=/usr/local/bin/go-euc-postsetup-cleanup.sh
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/go-euc-postsetup-cleanup.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

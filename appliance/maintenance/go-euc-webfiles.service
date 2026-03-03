@@ -1,0 +1,16 @@
+[Unit]
+Description=GO-EUC post-setup web file host
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/influx-grafana/public
+ExecStart=/usr/bin/python3 -m http.server 80 --directory /opt/influx-grafana/public
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

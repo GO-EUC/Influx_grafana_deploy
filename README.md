@@ -152,6 +152,7 @@ The OVA exposes import-time properties (vApp/OVF) so these values can be entered
 - `APPLIANCE_NAME` or `APPLIANCE_HOSTNAME`
 - `APPLIANCE_NET_IFACE` (optional; auto-detected if omitted)
 - `APPLIANCE_STATIC_IP_CIDR` (example: `192.168.1.50/24`)
+- `APPLIANCE_NETMASK` (optional, for non-CIDR input such as `255.255.255.0`)
 - `APPLIANCE_GATEWAY`
 - `APPLIANCE_DNS` (comma-separated, example: `1.1.1.1,8.8.8.8`)
 
@@ -200,6 +201,15 @@ The login banner (`/etc/issue`) now shows:
 - `INITIALIZING` during provisioning
 - `COMPLETE` with runtime network details after provisioning
 - `FAILED` with error context if provisioning exits unexpectedly
+
+### Built-in web file host (port 80)
+
+The appliance runs a simple web server on port `80` serving:
+
+- `/opt/influx-grafana/public/index.html`
+- `/opt/influx-grafana/public/config.txt`
+
+`config.txt` includes appliance/service credentials and is automatically deleted on the first reboot after setup completion.
 
 ### Break-glass login
 
