@@ -156,6 +156,7 @@ The appliance now uses a first-console-login wizard (no OVA property prompts req
   - static IP (CIDR)
   - gateway
   - DNS servers
+  - optional new password for `goeucadmin` (leave blank to keep default)
 - Wizard writes `/etc/go-euc/config.env`, marks setup complete, and reboots.
 - After reboot, firstboot provisioning runs using those values.
 
@@ -207,10 +208,18 @@ The login banner (`/etc/issue`) now shows:
 
 The appliance runs a simple web server on port `80` serving:
 
-- `/opt/influx-grafana/public/index.html`
+- directory listing of `/opt/influx-grafana/public/`
 - `/opt/influx-grafana/public/config.txt`
+- `/opt/influx-grafana/public/telegraf/*`
 
 `config.txt` includes appliance/service credentials and is automatically deleted on the first reboot after setup completion.
+
+Telegraf artifacts:
+- latest Linux Telegraf package is downloaded into `/opt/influx-grafana/public/telegraf/`
+- `telegraf.conf` and `telegraf_vsphere.conf` are copied from `Telegraf/` and placeholders are replaced with:
+  - `TELEGRAF_ORGANISATION` = Influx organization
+  - `TELEGRAF_URL` = `http://<appliance-ip>:8086`
+  - `TELEGRAF_TOKEN` = generated Influx token
 
 ### Break-glass login
 

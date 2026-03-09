@@ -18,6 +18,8 @@ PUBLIC_CONFIG_FILE="${PUBLIC_DIR}/config.txt"
 PUBLIC_INDEX_FILE="${PUBLIC_DIR}/index.html"
 DELETE_CONFIG_BOOTID_FILE="/var/lib/go-euc/delete-config-after-bootid"
 CONSOLE_CONFIG_MARKER="/var/lib/go-euc/console-config.done"
+TELEGRAF_SOURCE_DIR="/opt/go-euc-installer/Telegraf"
+TELEGRAF_PUBLIC_DIR="${PUBLIC_DIR}/telegraf"
 
 mkdir -p /var/lib/go-euc /etc/go-euc "${INSTALL_ROOT}"
 
@@ -112,17 +114,6 @@ ensure_firstboot_prereqs() {
   systemctl enable --now open-vm-tools >/dev/null 2>&1 || true
 }
 
-generate_secret() {
-  local length="${1:-20}"
-  local charset='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@%+='
-  local i
-  local output=""
-  for ((i = 0; i < length; i++)); do
-    output+="${charset:RANDOM%${#charset}:1}"
-  done
-  printf '%s' "${output}"
-}
-
 create_appliance_login() {
   APPLIANCE_LOGIN_USER_RESOLVED="${APPLIANCE_LOGIN_USER:-goeucadmin}"
   APPLIANCE_LOGIN_PASSWORD_RESOLVED="${APPLIANCE_LOGIN_PASSWORD:-goeucadmin}"
@@ -188,6 +179,7 @@ publish_final_summary() {
   local saved_influx_user="<unknown>"
   local saved_influx_password="<unknown>"
   local saved_influx_org="<unknown>"
+  local saved_influx_token="<unknown>"
   local saved_grafana_user="<unknown>"
   local saved_grafana_password="<unknown>"
 
@@ -199,6 +191,7 @@ publish_final_summary() {
     saved_influx_user="${SAVED_INFLUX_ADMIN_USER:-<unknown>}"
     saved_influx_password="${SAVED_INFLUX_ADMIN_PASSWORD:-<unknown>}"
     saved_influx_org="${SAVED_INFLUX_ADMIN_ORG:-<unknown>}"
+    saved_influx_token="${SAVED_INFLUX_ADMIN_TOKEN:-<unknown>}"
     saved_grafana_user="${SAVED_GRAFANA_ADMIN_USER:-<unknown>}"
     saved_grafana_password="${SAVED_GRAFANA_ADMIN_PASSWORD:-<unknown>}"
   fi
@@ -255,6 +248,8 @@ EOF
   write_issue_status "COMPLETE" "${net_info}"
   cat "${SUMMARY_FILE}" >> "${LOGIN_BANNER_FILE}"
 
+  publish_telegraf_files "${host_ip}" "${saved_influx_org}" "${saved_influx_token}"
+
   cat > "${PUBLIC_CONFIG_FILE}" <<EOF
 GO-EUC APPLIANCE CONFIG
 
@@ -278,6 +273,12 @@ Org=${saved_influx_org}
 Grafana
 Username=${saved_grafana_user}
 Password=${saved_grafana_password}
+
+Telegraf
+PackageFolder=${TELEGRAF_PUBLIC_DIR}
+InfluxURL=http://${host_ip}:8086
+InfluxOrg=${saved_influx_org}
+InfluxToken=${saved_influx_token}
 EOF
   chmod 644 "${PUBLIC_CONFIG_FILE}"
 
@@ -429,7 +430,7 @@ EOF
   netplan apply
 }
 
-# Optional local override file (takes precedence over OVF if set).
+# Optional local override file (used by console-first setup).
 if [[ -f "${CONFIG_FILE}" ]]; then
   # shellcheck source=/dev/null
   source "${CONFIG_FILE}"
@@ -441,7 +442,7 @@ if [[ ! -f "${CONSOLE_CONFIG_MARKER}" ]]; then
   exit 0
 fi
 
-write_issue_status "INITIALIZING" "Applying console-provided settings and provisioning services."
+write_issue_status "INITIALIZING" "Monitoring services setup is running. This can take 10-20 minutes."
 bootstrap_dhcp_network
 ensure_firstboot_prereqs
 configure_ssh_access
@@ -458,17 +459,71 @@ configure_upgrade_timer() {
 
 configure_web_file_host() {
   mkdir -p "${PUBLIC_DIR}"
-
-  cat > "${PUBLIC_INDEX_FILE}" <<EOF
-GO-EUC appliance file host
-
-Available files:
-- config.txt (contains setup credentials; removed on first reboot post-setup)
-EOF
-  chmod 644 "${PUBLIC_INDEX_FILE}"
+  rm -f "${PUBLIC_INDEX_FILE}" || true
 
   systemctl daemon-reload || true
   systemctl enable --now go-euc-webfiles.service || true
+}
+
+publish_telegraf_files() {
+  local host_ip="$1"
+  local influx_org="$2"
+  local influx_token="$3"
+  local telegraf_url="http://${host_ip}:8086"
+  local conf_file=""
+  local arch=""
+  local download_url=""
+  local output_pkg=""
+
+  mkdir -p "${TELEGRAF_PUBLIC_DIR}"
+
+  if [[ -d "${TELEGRAF_SOURCE_DIR}" ]]; then
+    cp -f "${TELEGRAF_SOURCE_DIR}"/*.conf "${TELEGRAF_PUBLIC_DIR}/" 2>/dev/null || true
+  fi
+
+  for conf_file in "${TELEGRAF_PUBLIC_DIR}"/*.conf; do
+    [[ -f "${conf_file}" ]] || continue
+    sed -i \
+      -e "s|<<TELEGRAF_ORGANISATION>>|${influx_org}|g" \
+      -e "s|<<TELEGRAF_URL>>|${telegraf_url}|g" \
+      -e "s|<<TELEGRAF_TOKEN>>|${influx_token}|g" \
+      -e "s|<<TELEGRAG_TOKEN>>|${influx_token}|g" \
+      "${conf_file}" || true
+  done
+
+  case "$(uname -m)" in
+    x86_64) arch="amd64" ;;
+    aarch64|arm64) arch="arm64" ;;
+    *) arch="amd64" ;;
+  esac
+
+  download_url="$(python3 - "${arch}" <<'PY'
+import json
+import sys
+import urllib.request
+
+arch = sys.argv[1]
+api = "https://api.github.com/repos/influxdata/telegraf/releases/latest"
+try:
+    data = json.loads(urllib.request.urlopen(api, timeout=15).read().decode("utf-8"))
+except Exception:
+    print("")
+    raise SystemExit(0)
+
+for asset in data.get("assets", []):
+    name = asset.get("name", "")
+    url = asset.get("browser_download_url", "")
+    if f"linux_{arch}" in name and name.endswith(".tar.gz"):
+        print(url)
+        raise SystemExit(0)
+print("")
+PY
+)"
+
+  if [[ -n "${download_url}" ]]; then
+    output_pkg="${TELEGRAF_PUBLIC_DIR}/$(basename "${download_url}")"
+    curl -fsSL "${download_url}" -o "${output_pkg}" || true
+  fi
 }
 
 apply_hostname_config

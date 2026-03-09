@@ -8,4 +8,5 @@ terraform/terraform.tfvars
 terraform/outputs.json
 terraform/outputs-*.json
 dist/
+.DS_Store
 DS_Store

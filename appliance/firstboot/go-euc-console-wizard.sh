@@ -56,9 +56,28 @@ done
 read -r -p "DNS servers comma-separated [${DEFAULT_DNS:-1.1.1.1,8.8.8.8}]: " APPLIANCE_DNS
 APPLIANCE_DNS="${APPLIANCE_DNS:-${DEFAULT_DNS:-1.1.1.1,8.8.8.8}}"
 
+echo
+echo "Appliance login user is: goeucadmin"
+echo "Default password is currently: goeucadmin"
+while true; do
+  read -r -s -p "Enter new goeucadmin password (leave blank to keep current): " APPLIANCE_LOGIN_PASSWORD
+  echo
+  if [[ -z "${APPLIANCE_LOGIN_PASSWORD}" ]]; then
+    break
+  fi
+
+  read -r -s -p "Confirm new password: " APPLIANCE_LOGIN_PASSWORD_CONFIRM
+  echo
+  if [[ "${APPLIANCE_LOGIN_PASSWORD}" == "${APPLIANCE_LOGIN_PASSWORD_CONFIRM}" ]]; then
+    break
+  fi
+  echo "Passwords do not match. Try again."
+  APPLIANCE_LOGIN_PASSWORD=""
+done
+
 TMP_FILE="$(mktemp /tmp/go-euc-config-XXXXXX)"
 if [[ -f "${CONFIG_FILE}" ]]; then
-  grep -Ev '^(APPLIANCE_NAME|APPLIANCE_HOSTNAME|APPLIANCE_NET_IFACE|APPLIANCE_STATIC_IP_CIDR|APPLIANCE_GATEWAY|APPLIANCE_DNS)=' "${CONFIG_FILE}" > "${TMP_FILE}" || true
+  grep -Ev '^(APPLIANCE_NAME|APPLIANCE_HOSTNAME|APPLIANCE_NET_IFACE|APPLIANCE_STATIC_IP_CIDR|APPLIANCE_GATEWAY|APPLIANCE_DNS|APPLIANCE_LOGIN_PASSWORD)=' "${CONFIG_FILE}" > "${TMP_FILE}" || true
 fi
 
 cat >> "${TMP_FILE}" <<EOF
@@ -68,6 +87,12 @@ APPLIANCE_STATIC_IP_CIDR=${APPLIANCE_STATIC_IP_CIDR}
 APPLIANCE_GATEWAY=${APPLIANCE_GATEWAY}
 APPLIANCE_DNS=${APPLIANCE_DNS}
 EOF
+
+if [[ -n "${APPLIANCE_LOGIN_PASSWORD}" ]]; then
+  cat >> "${TMP_FILE}" <<EOF
+APPLIANCE_LOGIN_PASSWORD=${APPLIANCE_LOGIN_PASSWORD}
+EOF
+fi
 
 mv "${TMP_FILE}" "${CONFIG_FILE}"
 chmod 600 "${CONFIG_FILE}"

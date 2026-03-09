@@ -83,6 +83,7 @@ First-boot status:
 EOF" \
   --copy-in "${ROOT_DIR}/scripts/step1_install_base.sh:/opt/go-euc-installer/scripts" \
   --copy-in "${ROOT_DIR}/Dashboards.zip:/opt/go-euc-installer" \
+  --copy-in "${ROOT_DIR}/Telegraf:/opt/go-euc-installer" \
   --copy-in "${ROOT_DIR}/appliance/firstboot/go-euc-firstboot.sh:/usr/local/bin" \
   --copy-in "${ROOT_DIR}/appliance/firstboot/go-euc-firstboot.service:/etc/systemd/system" \
   --copy-in "${ROOT_DIR}/appliance/firstboot/go-euc-console-wizard.sh:/usr/local/bin" \
