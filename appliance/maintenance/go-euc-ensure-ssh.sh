@@ -19,6 +19,14 @@ ensure_sshd_config() {
   sed -i 's/^[#[:space:]]*KbdInteractiveAuthentication.*/KbdInteractiveAuthentication no/' /etc/ssh/sshd_config || true
 }
 
+ensure_host_keys() {
+  mkdir -p /etc/ssh
+  if ! ls /etc/ssh/ssh_host_*_key >/dev/null 2>&1; then
+    log "SSH host keys missing, generating with ssh-keygen -A."
+    ssh-keygen -A >/dev/null 2>&1 || true
+  fi
+}
+
 start_ssh_service() {
   systemctl enable --now ssh >/dev/null 2>&1 || systemctl enable --now sshd >/dev/null 2>&1 || true
   systemctl restart ssh >/dev/null 2>&1 || systemctl restart sshd >/dev/null 2>&1 || true
@@ -27,6 +35,7 @@ start_ssh_service() {
 if command -v sshd >/dev/null 2>&1; then
   log "openssh-server already installed."
   ensure_sshd_config
+  ensure_host_keys
   start_ssh_service
   exit 0
 fi
@@ -39,6 +48,7 @@ fi
 log "openssh-server missing, attempting install."
 if apt-get update -y >/dev/null 2>&1 && apt-get install -y openssh-server >/dev/null 2>&1; then
   ensure_sshd_config
+  ensure_host_keys
   start_ssh_service
   log "openssh-server installed and started."
 else
