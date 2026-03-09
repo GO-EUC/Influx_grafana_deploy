@@ -17,7 +17,7 @@ PUBLIC_DIR="${INSTALL_ROOT}/public"
 PUBLIC_CONFIG_FILE="${PUBLIC_DIR}/config.txt"
 PUBLIC_INDEX_FILE="${PUBLIC_DIR}/index.html"
 DELETE_CONFIG_BOOTID_FILE="/var/lib/go-euc/delete-config-after-bootid"
-OVF_ENV_FILE="${INSTALL_ROOT}/ovf-env.xml"
+CONSOLE_CONFIG_MARKER="/var/lib/go-euc/console-config.done"
 
 mkdir -p /var/lib/go-euc /etc/go-euc "${INSTALL_ROOT}"
 
@@ -167,7 +167,16 @@ configure_ssh_access() {
   if ! grep -q '^PasswordAuthentication yes' /etc/ssh/sshd_config; then
     echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
   fi
-  sed -i 's/^[#[:space:]]*KbdInteractiveAuthentication.*/KbdInteractiveAuthentication no/' /etc/ssh/sshd_config || true
+  sed -i 's/^[#[:space:]]*KbdInteractiveAuthentication.*/KbdInteractiveAuthentication yes/' /etc/ssh/sshd_config || true
+  if ! grep -q '^UsePAM yes' /etc/ssh/sshd_config; then
+    echo 'UsePAM yes' >> /etc/ssh/sshd_config
+  fi
+
+  # Ensure host keys exist so sshd can start.
+  mkdir -p /etc/ssh
+  if ! ls /etc/ssh/ssh_host_*_key >/dev/null 2>&1; then
+    ssh-keygen -A >/dev/null 2>&1 || true
+  fi
 
   systemctl enable --now ssh >/dev/null 2>&1 || true
   systemctl restart ssh >/dev/null 2>&1 || true
@@ -274,99 +283,6 @@ EOF
 
   cat /proc/sys/kernel/random/boot_id > "${DELETE_CONFIG_BOOTID_FILE}"
   chmod 600 "${DELETE_CONFIG_BOOTID_FILE}"
-}
-
-read_ovf_property() {
-  local key="$1"
-  local ovf_xml=""
-  if ! command -v vmtoolsd >/dev/null 2>&1; then
-    return 0
-  fi
-
-  ovf_xml="$(vmtoolsd --cmd 'info-get guestinfo.ovfEnv' 2>/dev/null || true)"
-  if [[ -z "${ovf_xml}" ]]; then
-    return 0
-  fi
-
-  printf '%s\n' "${ovf_xml}" > "${OVF_ENV_FILE}" || true
-
-  OVF_XML="${ovf_xml}" python3 -c '
-import os
-import sys
-import xml.etree.ElementTree as ET
-
-want = sys.argv[1]
-data = os.environ.get("OVF_XML", "")
-if not data.strip():
-    print("")
-    raise SystemExit(0)
-
-try:
-    root = ET.fromstring(data)
-except Exception:
-    print("")
-    raise SystemExit(0)
-
-def lname(tag):
-    return tag.rsplit("}", 1)[-1]
-
-for elem in root.iter():
-    if lname(elem.tag) != "Property":
-        continue
-    key_attr = ""
-    val_attr = ""
-    for attr_name, attr_val in elem.attrib.items():
-        la = lname(attr_name)
-        if la == "key":
-            key_attr = attr_val
-        elif la == "value":
-            val_attr = attr_val
-    key_match = (
-        key_attr == want
-        or key_attr.endswith("." + want)
-        or key_attr.rsplit(".", 1)[-1] == want
-    )
-    if key_match:
-        print(val_attr.strip())
-        raise SystemExit(0)
-
-print("")
-' "${key}" 2>/dev/null
-}
-
-load_ovf_properties() {
-  local tries=30
-  local wait_seconds=2
-  local i
-
-  # Values entered during OVA import (vApp/OVF properties).
-  for ((i = 1; i <= tries; i++)); do
-    APPLIANCE_NAME="${APPLIANCE_NAME:-$(read_ovf_property appliance_name)}"
-    APPLIANCE_NET_IFACE="${APPLIANCE_NET_IFACE:-$(read_ovf_property appliance_net_iface)}"
-    APPLIANCE_STATIC_IP_CIDR="${APPLIANCE_STATIC_IP_CIDR:-$(read_ovf_property appliance_static_ip_cidr)}"
-    APPLIANCE_NETMASK="${APPLIANCE_NETMASK:-$(read_ovf_property appliance_netmask)}"
-    APPLIANCE_GATEWAY="${APPLIANCE_GATEWAY:-$(read_ovf_property appliance_gateway)}"
-    APPLIANCE_DNS="${APPLIANCE_DNS:-$(read_ovf_property appliance_dns)}"
-
-    if [[ -n "${APPLIANCE_STATIC_IP_CIDR:-}" || -n "${APPLIANCE_GATEWAY:-}" || -n "${APPLIANCE_DNS:-}" || -n "${APPLIANCE_NAME:-}" ]]; then
-      break
-    fi
-    sleep "${wait_seconds}"
-  done
-}
-
-log_detected_ovf_settings() {
-  if ! command -v vmtoolsd >/dev/null 2>&1; then
-    echo "[firstboot] vmtoolsd not found; OVF/vApp properties unavailable."
-  fi
-  echo "[firstboot] OVF properties detected:"
-  echo "[firstboot]   appliance_name=${APPLIANCE_NAME:-<not-set>}"
-  echo "[firstboot]   appliance_net_iface=${APPLIANCE_NET_IFACE:-<auto-detect>}"
-  echo "[firstboot]   appliance_static_ip_cidr=${APPLIANCE_STATIC_IP_CIDR:-<not-set>}"
-  echo "[firstboot]   appliance_netmask=${APPLIANCE_NETMASK:-<not-set>}"
-  echo "[firstboot]   appliance_gateway=${APPLIANCE_GATEWAY:-<not-set>}"
-  echo "[firstboot]   appliance_dns=${APPLIANCE_DNS:-<not-set>}"
-  echo "[firstboot]   ovf_env_file=${OVF_ENV_FILE}"
 }
 
 detect_primary_interface() {
@@ -520,12 +436,15 @@ if [[ -f "${CONFIG_FILE}" ]]; then
 fi
 
 create_appliance_login
-write_issue_status "INITIALIZING" "Bootstrapping appliance and applying imported OVA settings."
+if [[ ! -f "${CONSOLE_CONFIG_MARKER}" ]]; then
+  write_issue_status "PENDING-CONSOLE-CONFIG" "Log in on console to run the initial hostname/IP wizard."
+  exit 0
+fi
+
+write_issue_status "INITIALIZING" "Applying console-provided settings and provisioning services."
 bootstrap_dhcp_network
 ensure_firstboot_prereqs
 configure_ssh_access
-load_ovf_properties
-log_detected_ovf_settings
 
 configure_upgrade_timer() {
   if [[ "${AUTO_UPGRADE_ENABLED:-false}" == "true" ]]; then

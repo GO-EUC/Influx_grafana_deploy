@@ -59,7 +59,7 @@ elif command -v sudo >/dev/null 2>&1 && [[ "${USE_SUDO_FOR_VIRT_CUSTOMIZE:-false
 fi
 
 ${VIRT_CUSTOMIZE_CMD} "${VIRT_CUSTOMIZE_ARGS[@]}" -a "${QCOW2_PATH}" \
-  --run-command "mkdir -p /opt/go-euc-installer/scripts /etc/go-euc /usr/local/bin /var/lib/go-euc /etc/systemd/system" \
+  --run-command "mkdir -p /opt/go-euc-installer/scripts /etc/go-euc /usr/local/bin /var/lib/go-euc /etc/systemd/system /etc/profile.d" \
   --run-command "id -u ${BREAK_GLASS_USER} >/dev/null 2>&1 || useradd -m -s /bin/bash ${BREAK_GLASS_USER}" \
   --run-command "echo '${BREAK_GLASS_USER}:${BREAK_GLASS_PASSWORD}' | chpasswd" \
   --run-command "usermod -aG sudo ${BREAK_GLASS_USER}" \
@@ -72,7 +72,8 @@ EOF" \
   --run-command "cat >/etc/issue <<'EOF'
 GO-EUC APPLIANCE - INITIALIZING
 
-If setup is still running, log in with break-glass account:
+If setup is pending, log in on console and complete the first login wizard.
+If setup is still running or failed, log in with break-glass account:
   username: ${BREAK_GLASS_USER}
   password: ${BREAK_GLASS_PASSWORD}
 
@@ -84,6 +85,8 @@ EOF" \
   --copy-in "${ROOT_DIR}/Dashboards.zip:/opt/go-euc-installer" \
   --copy-in "${ROOT_DIR}/appliance/firstboot/go-euc-firstboot.sh:/usr/local/bin" \
   --copy-in "${ROOT_DIR}/appliance/firstboot/go-euc-firstboot.service:/etc/systemd/system" \
+  --copy-in "${ROOT_DIR}/appliance/firstboot/go-euc-console-wizard.sh:/usr/local/bin" \
+  --copy-in "${ROOT_DIR}/appliance/firstboot/go-euc-login-hook.sh:/etc/profile.d" \
   --copy-in "${ROOT_DIR}/appliance/firstboot/config.env.example:/etc/go-euc" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-autogrow.sh:/usr/local/bin" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-autogrow.service:/etc/systemd/system" \
@@ -95,7 +98,7 @@ EOF" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-ensure-ssh.service:/etc/systemd/system" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-postsetup-cleanup.sh:/usr/local/bin" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-postsetup-cleanup.service:/etc/systemd/system" \
-  --run-command "chmod +x /usr/local/bin/go-euc-firstboot.sh /usr/local/bin/go-euc-autogrow.sh /usr/local/bin/go-euc-upgrade.sh /usr/local/bin/go-euc-ensure-ssh.sh /usr/local/bin/go-euc-postsetup-cleanup.sh /opt/go-euc-installer/scripts/step1_install_base.sh" \
+  --run-command "chmod +x /usr/local/bin/go-euc-firstboot.sh /usr/local/bin/go-euc-console-wizard.sh /usr/local/bin/go-euc-autogrow.sh /usr/local/bin/go-euc-upgrade.sh /usr/local/bin/go-euc-ensure-ssh.sh /usr/local/bin/go-euc-postsetup-cleanup.sh /opt/go-euc-installer/scripts/step1_install_base.sh /etc/profile.d/go-euc-login-hook.sh" \
   --run-command "ln -sf /etc/systemd/system/go-euc-firstboot.service /etc/systemd/system/multi-user.target.wants/go-euc-firstboot.service" \
   --run-command "ln -sf /etc/systemd/system/go-euc-autogrow.service /etc/systemd/system/multi-user.target.wants/go-euc-autogrow.service" \
   --run-command "ln -sf /etc/systemd/system/go-euc-ensure-ssh.service /etc/systemd/system/multi-user.target.wants/go-euc-ensure-ssh.service" \
@@ -130,7 +133,7 @@ cat > "${OVF_PATH}" <<EOF
       <Description>VM Network</Description>
     </Network>
   </NetworkSection>
-  <VirtualSystem ovf:id="${APPLIANCE_BASENAME}" ovf:transport="com.vmware.guestInfo">
+  <VirtualSystem ovf:id="${APPLIANCE_BASENAME}">
     <Info>GO-EUC appliance</Info>
     <Name>${APPLIANCE_BASENAME}</Name>
     <OperatingSystemSection ovf:id="94">
@@ -187,34 +190,6 @@ cat > "${OVF_PATH}" <<EOF
         <rasd:ResourceType>10</rasd:ResourceType>
       </Item>
     </VirtualHardwareSection>
-    <ProductSection ovf:class="go-euc">
-      <Info>Deployment properties</Info>
-      <Category>Networking</Category>
-      <Property ovf:key="appliance_name" ovf:type="string" ovf:userConfigurable="true">
-        <Label>Appliance Name</Label>
-        <Description>Optional hostname for the appliance VM.</Description>
-      </Property>
-      <Property ovf:key="appliance_net_iface" ovf:type="string" ovf:userConfigurable="true">
-        <Label>Network Interface</Label>
-        <Description>Optional interface name (for example ens160).</Description>
-      </Property>
-      <Property ovf:key="appliance_static_ip_cidr" ovf:type="string" ovf:userConfigurable="true">
-        <Label>IP Settings (CIDR)</Label>
-        <Description>Optional static IPv4 in CIDR format, for example 192.168.1.50/24.</Description>
-      </Property>
-      <Property ovf:key="appliance_netmask" ovf:type="string" ovf:userConfigurable="true">
-        <Label>Netmask (optional)</Label>
-        <Description>Optional netmask (for example 255.255.255.0) if IP is provided without CIDR prefix.</Description>
-      </Property>
-      <Property ovf:key="appliance_gateway" ovf:type="string" ovf:userConfigurable="true">
-        <Label>Gateway</Label>
-        <Description>Optional default gateway IP address.</Description>
-      </Property>
-      <Property ovf:key="appliance_dns" ovf:type="string" ovf:userConfigurable="true">
-        <Label>DNS</Label>
-        <Description>Optional comma-separated DNS servers, for example 1.1.1.1,8.8.8.8.</Description>
-      </Property>
-    </ProductSection>
   </VirtualSystem>
 </Envelope>
 EOF

@@ -146,21 +146,21 @@ The workflow job already includes:
 environment: appliance-build
 ```
 
-### Appliance import customization (name/IP/DNS)
+### Console-first network setup
 
-The OVA exposes import-time properties (vApp/OVF) so these values can be entered during hypervisor import:
+The appliance now uses a first-console-login wizard (no OVA property prompts required):
 
-- `APPLIANCE_NAME` or `APPLIANCE_HOSTNAME`
-- `APPLIANCE_NET_IFACE` (optional; auto-detected if omitted)
-- `APPLIANCE_STATIC_IP_CIDR` (example: `192.168.1.50/24`)
-- `APPLIANCE_NETMASK` (optional, for non-CIDR input such as `255.255.255.0`)
-- `APPLIANCE_GATEWAY`
-- `APPLIANCE_DNS` (comma-separated, example: `1.1.1.1,8.8.8.8`)
-
-At first boot, the appliance reads OVF properties through VMware guestinfo and applies hostname/network automatically.
+- On first local console login, `go-euc-console-wizard.sh` prompts for:
+  - hostname
+  - network interface
+  - static IP (CIDR)
+  - gateway
+  - DNS servers
+- Wizard writes `/etc/go-euc/config.env`, marks setup complete, and reboots.
+- After reboot, firstboot provisioning runs using those values.
 
 Optional fallback:
-- You can still provide `/etc/go-euc/config.env` for non-OVF environments.
+- You can still edit `/etc/go-euc/config.env` manually.
 - Template: `appliance/firstboot/config.env.example`
 
 ### Upgrading container versions on appliance
