@@ -16,10 +16,13 @@ STATIC_NETPLAN_FILE="/etc/netplan/99-go-euc-appliance.yaml"
 PUBLIC_DIR="${INSTALL_ROOT}/public"
 PUBLIC_CONFIG_FILE="${PUBLIC_DIR}/config.txt"
 PUBLIC_INDEX_FILE="${PUBLIC_DIR}/index.html"
+PUBLIC_CGI_DIR="${PUBLIC_DIR}/cgi-bin"
+PUBLIC_TELEGRAF_REFRESH_CGI="${PUBLIC_CGI_DIR}/fetch-telegraf.sh"
 DELETE_CONFIG_BOOTID_FILE="/var/lib/go-euc/delete-config-after-bootid"
 CONSOLE_CONFIG_MARKER="/var/lib/go-euc/console-config.done"
 TELEGRAF_SOURCE_DIR="/opt/go-euc-installer/Telegraf"
 TELEGRAF_PUBLIC_DIR="${PUBLIC_DIR}/telegraf"
+TELEGRAF_REFRESH_SCRIPT="/usr/local/bin/go-euc-refresh-telegraf.sh"
 
 mkdir -p /var/lib/go-euc /etc/go-euc "${INSTALL_ROOT}"
 
@@ -459,7 +462,181 @@ configure_upgrade_timer() {
 
 configure_web_file_host() {
   mkdir -p "${PUBLIC_DIR}"
-  rm -f "${PUBLIC_INDEX_FILE}" || true
+  mkdir -p "${PUBLIC_CGI_DIR}"
+
+  cat > "${TELEGRAF_REFRESH_SCRIPT}" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+TELEGRAF_PUBLIC_DIR="/opt/influx-grafana/public/telegraf"
+mkdir -p "${TELEGRAF_PUBLIC_DIR}"
+
+download_url="$(python3 - <<'PY'
+import json
+import re
+import urllib.request
+
+HEADERS = {
+    "User-Agent": "go-euc-appliance/1.0",
+    "Accept": "application/vnd.github+json",
+}
+
+def fetch_text(url, timeout=20):
+    req = urllib.request.Request(url, headers=HEADERS)
+    return urllib.request.urlopen(req, timeout=timeout).read().decode("utf-8", "ignore")
+
+def fetch_json(url, timeout=20):
+    return json.loads(fetch_text(url, timeout=timeout))
+
+def pick_latest_asset_url(data):
+    for asset in data.get("assets", []):
+        name = asset.get("name", "").lower()
+        url = asset.get("browser_download_url", "")
+        if "windows_amd64" in name and name.endswith(".zip") and url:
+            return url
+    return ""
+
+api = "https://api.github.com/repos/influxdata/telegraf/releases/latest"
+try:
+    data = fetch_json(api, timeout=20)
+    url = pick_latest_asset_url(data)
+    if url:
+        print(url)
+        raise SystemExit(0)
+except Exception:
+    pass
+
+releases_page = "https://github.com/influxdata/telegraf/releases"
+try:
+    html = fetch_text(releases_page, timeout=20)
+except Exception:
+    print("")
+    raise SystemExit(0)
+
+match = re.search(r'href="([^"]*telegraf[^"]*_windows_amd64[^"]*\.zip)"', html, re.IGNORECASE)
+if match:
+    href = match.group(1)
+    if href.startswith("/"):
+        href = f"https://github.com{href}"
+    print(href)
+    raise SystemExit(0)
+
+print("")
+PY
+)"
+
+if [[ -z "${download_url}" ]]; then
+  echo "Unable to resolve latest Telegraf windows_amd64 release asset URL." >&2
+  exit 1
+fi
+
+output_pkg="${TELEGRAF_PUBLIC_DIR}/$(basename "${download_url}")"
+tmp_pkg="$(mktemp /tmp/telegraf-windows-amd64-XXXXXX.zip)"
+
+if ! curl -fLSs "${download_url}" -o "${tmp_pkg}"; then
+  rm -f "${tmp_pkg}" || true
+  echo "Failed to download ${download_url}" >&2
+  exit 1
+fi
+
+mv -f "${tmp_pkg}" "${output_pkg}"
+cp -f "${output_pkg}" "${TELEGRAF_PUBLIC_DIR}/telegraf_windows_amd64_latest.zip" || true
+
+python3 - "${output_pkg}" "${TELEGRAF_PUBLIC_DIR}/telegraf.exe" <<'PY'
+import sys
+import zipfile
+
+zip_path = sys.argv[1]
+exe_out = sys.argv[2]
+member = None
+
+with zipfile.ZipFile(zip_path) as zf:
+    for name in zf.namelist():
+        lower = name.lower()
+        if lower.endswith("/telegraf.exe") or lower == "telegraf.exe":
+            member = name
+            break
+    if member is None:
+        raise RuntimeError("telegraf.exe not found in downloaded archive")
+    with zf.open(member) as src, open(exe_out, "wb") as dst:
+        dst.write(src.read())
+PY
+
+echo "Downloaded: ${output_pkg}"
+echo "Extracted: ${TELEGRAF_PUBLIC_DIR}/telegraf.exe"
+EOF
+  chmod 755 "${TELEGRAF_REFRESH_SCRIPT}"
+
+  cat > "${PUBLIC_TELEGRAF_REFRESH_CGI}" <<'EOF'
+#!/usr/bin/env bash
+set -uo pipefail
+
+echo "Content-Type: text/plain"
+echo
+
+if /usr/local/bin/go-euc-refresh-telegraf.sh 2>&1; then
+  echo
+  echo "Refresh completed."
+else
+  rc="$?"
+  echo
+  echo "Refresh failed with exit code ${rc}."
+fi
+
+echo
+echo "Current /telegraf files:"
+ls -1 /opt/influx-grafana/public/telegraf 2>/dev/null || true
+EOF
+  chmod 755 "${PUBLIC_TELEGRAF_REFRESH_CGI}"
+
+  cat > "${PUBLIC_INDEX_FILE}" <<'EOF'
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GO-EUC Appliance Files</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2rem; line-height: 1.4; }
+    button { padding: 0.6rem 1rem; font-size: 1rem; cursor: pointer; }
+    pre { background: #f6f8fa; padding: 1rem; border: 1px solid #d0d7de; border-radius: 6px; white-space: pre-wrap; }
+    .links a { display: inline-block; margin: 0.2rem 0.6rem 0.2rem 0; }
+  </style>
+</head>
+<body>
+  <h1>GO-EUC Appliance File Host</h1>
+  <p class="links">
+    <a href="/telegraf/">Browse /telegraf/</a>
+    <a href="/config.txt">View config.txt</a>
+  </p>
+  <button id="refreshBtn" type="button">Fetch latest Telegraf Windows package</button>
+  <p id="status"></p>
+  <pre id="output">Click the button to fetch/update Telegraf package and telegraf.exe.</pre>
+  <script>
+    const btn = document.getElementById('refreshBtn');
+    const status = document.getElementById('status');
+    const output = document.getElementById('output');
+
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      status.textContent = 'Refreshing package...';
+      output.textContent = '';
+      try {
+        const res = await fetch('/cgi-bin/fetch-telegraf.sh', { method: 'POST' });
+        output.textContent = await res.text();
+        status.textContent = res.ok ? 'Refresh request completed.' : 'Refresh request returned an error.';
+      } catch (err) {
+        status.textContent = 'Refresh request failed.';
+        output.textContent = String(err);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
+EOF
+  chmod 644 "${PUBLIC_INDEX_FILE}"
 
   systemctl daemon-reload || true
   systemctl enable --now go-euc-webfiles.service || true
@@ -471,8 +648,6 @@ publish_telegraf_files() {
   local influx_token="$3"
   local telegraf_url="http://${host_ip}:8086"
   local conf_file=""
-  local download_url=""
-  local output_pkg=""
 
   mkdir -p "${TELEGRAF_PUBLIC_DIR}"
 
@@ -490,54 +665,7 @@ publish_telegraf_files() {
       "${conf_file}" || true
   done
 
-  download_url="$(python3 - <<'PY'
-import json
-import re
-import sys
-import urllib.request
-
-def pick_latest_asset_url(data):
-    for asset in data.get("assets", []):
-        name = asset.get("name", "").lower()
-        url = asset.get("browser_download_url", "")
-        if "windows_amd64" in name and name.endswith(".zip") and url:
-            return url
-    return ""
-
-api = "https://api.github.com/repos/influxdata/telegraf/releases/latest"
-try:
-    data = json.loads(urllib.request.urlopen(api, timeout=20).read().decode("utf-8"))
-    url = pick_latest_asset_url(data)
-    if url:
-        print(url)
-        raise SystemExit(0)
-except Exception:
-    pass
-
-# Fallback: scrape releases page for the first windows_amd64 zip link.
-releases_page = "https://github.com/influxdata/telegraf/releases"
-try:
-    html = urllib.request.urlopen(releases_page, timeout=20).read().decode("utf-8", "ignore")
-except Exception:
-    print("")
-    raise SystemExit(0)
-
-match = re.search(r'href="([^"]*telegraf[^"]*_windows_amd64[^"]*\.zip)"', html, re.IGNORECASE)
-if match:
-    href = match.group(1)
-    if href.startswith("/"):
-        href = f"https://github.com{href}"
-    print(href)
-    raise SystemExit(0)
-
-print("")
-PY
-)"
-
-  if [[ -n "${download_url}" ]]; then
-    output_pkg="${TELEGRAF_PUBLIC_DIR}/$(basename "${download_url}")"
-    curl -fsSL "${download_url}" -o "${output_pkg}" || true
-  fi
+  "${TELEGRAF_REFRESH_SCRIPT}" || true
 }
 
 apply_hostname_config

@@ -64,6 +64,8 @@ Optional: you can pre-seed or manually edit `/etc/go-euc/config.env` using `appl
 The built-in web file host serves `/opt/influx-grafana/public/`, including:
 
 - `/telegraf/telegraf-*_windows_amd64.zip` (latest Telegraf Windows x64 package)
+- `/telegraf/telegraf_windows_amd64_latest.zip` (stable filename pointer to latest package)
+- `/telegraf/telegraf.exe` (extracted from the downloaded zip for direct download)
 - `/telegraf/telegraf.conf`
 - `/telegraf/telegraf_vsphere.conf`
 - `/config.txt` (temporary post-install config summary)
@@ -73,6 +75,8 @@ The built-in web file host serves `/opt/influx-grafana/public/`, including:
 - Influx org
 - Influx URL (`http://<appliance-ip>:8086`)
 - generated Influx token
+
+The default web page (`http://<appliance-ip>/`) includes a **Fetch latest Telegraf Windows package** button that triggers an on-demand refresh and repopulates `/telegraf/`.
 
 For Windows install steps, see `Telegraf/WINDOWS_INSTALL.md`.
 
