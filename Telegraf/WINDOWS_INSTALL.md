@@ -10,7 +10,7 @@ From a Windows machine, open:
 
 Download:
 
-- latest Telegraf package (`.tar.gz`)
+- latest Telegraf package (`*_windows_amd64.zip`)
 - `telegraf.conf` (Windows host metrics)
 - `telegraf_vsphere.conf` (vSphere metrics collector)
 
@@ -26,7 +26,7 @@ Open PowerShell as Administrator:
 
 ```powershell
 New-Item -ItemType Directory -Force -Path C:\Telegraf | Out-Null
-tar -xzf .\telegraf-*.tar.gz -C C:\Telegraf --strip-components=1
+Expand-Archive -Path .\telegraf-*_windows_amd64.zip -DestinationPath C:\Telegraf -Force
 ```
 
 Copy the desired config:

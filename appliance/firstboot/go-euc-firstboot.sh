@@ -471,7 +471,6 @@ publish_telegraf_files() {
   local influx_token="$3"
   local telegraf_url="http://${host_ip}:8086"
   local conf_file=""
-  local arch=""
   local download_url=""
   local output_pkg=""
 
@@ -491,31 +490,46 @@ publish_telegraf_files() {
       "${conf_file}" || true
   done
 
-  case "$(uname -m)" in
-    x86_64) arch="amd64" ;;
-    aarch64|arm64) arch="arm64" ;;
-    *) arch="amd64" ;;
-  esac
-
-  download_url="$(python3 - "${arch}" <<'PY'
+  download_url="$(python3 - <<'PY'
 import json
+import re
 import sys
 import urllib.request
 
-arch = sys.argv[1]
+def pick_latest_asset_url(data):
+    for asset in data.get("assets", []):
+        name = asset.get("name", "").lower()
+        url = asset.get("browser_download_url", "")
+        if "windows_amd64" in name and name.endswith(".zip") and url:
+            return url
+    return ""
+
 api = "https://api.github.com/repos/influxdata/telegraf/releases/latest"
 try:
-    data = json.loads(urllib.request.urlopen(api, timeout=15).read().decode("utf-8"))
+    data = json.loads(urllib.request.urlopen(api, timeout=20).read().decode("utf-8"))
+    url = pick_latest_asset_url(data)
+    if url:
+        print(url)
+        raise SystemExit(0)
+except Exception:
+    pass
+
+# Fallback: scrape releases page for the first windows_amd64 zip link.
+releases_page = "https://github.com/influxdata/telegraf/releases"
+try:
+    html = urllib.request.urlopen(releases_page, timeout=20).read().decode("utf-8", "ignore")
 except Exception:
     print("")
     raise SystemExit(0)
 
-for asset in data.get("assets", []):
-    name = asset.get("name", "")
-    url = asset.get("browser_download_url", "")
-    if f"linux_{arch}" in name and name.endswith(".tar.gz"):
-        print(url)
-        raise SystemExit(0)
+match = re.search(r'href="([^"]*telegraf[^"]*_windows_amd64[^"]*\.zip)"', html, re.IGNORECASE)
+if match:
+    href = match.group(1)
+    if href.startswith("/"):
+        href = f"https://github.com{href}"
+    print(href)
+    raise SystemExit(0)
+
 print("")
 PY
 )"

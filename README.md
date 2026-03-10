@@ -215,7 +215,7 @@ The appliance runs a simple web server on port `80` serving:
 `config.txt` includes appliance/service credentials and is automatically deleted on the first reboot after setup completion.
 
 Telegraf artifacts:
-- latest Linux Telegraf package is downloaded into `/opt/influx-grafana/public/telegraf/`
+- latest Windows x64 Telegraf package (`*_windows_amd64.zip`) is downloaded into `/opt/influx-grafana/public/telegraf/`
 - `telegraf.conf` and `telegraf_vsphere.conf` are copied from `Telegraf/` and placeholders are replaced with:
   - `TELEGRAF_ORGANISATION` = Influx organization
   - `TELEGRAF_URL` = `http://<appliance-ip>:8086`
