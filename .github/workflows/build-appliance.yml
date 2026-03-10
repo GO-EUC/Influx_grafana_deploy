@@ -3,12 +3,12 @@ name: Build Virtual Appliance
 on:
   push:
     branches:
-      - "**"
+      - dev
+      - main
   workflow_dispatch:
 
 permissions:
-  contents: read
-  id-token: write
+  contents: write
 
 jobs:
   build-and-publish:
@@ -18,6 +18,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install build dependencies
         run: |
@@ -61,33 +63,36 @@ jobs:
           path: |
             dist/virt-customize.log
 
-      - name: Azure Login (OIDC)
-        uses: azure/login@v2
+      - name: Create GitHub Release and upload assets
+        if: github.ref_name == 'main'
+        id: version
+        run: |
+          git fetch --tags --force
+          LATEST_TAG="$(
+            git tag -l 'v*' \
+              | awk '/^v[0-9]+\.[0-9]+$/ { print }' \
+              | sort -V \
+              | tail -n1
+          )"
+
+          if [ -z "${LATEST_TAG}" ]; then
+            NEXT_TAG="v1.0"
+          else
+            VERSION_NO_V="${LATEST_TAG#v}"
+            MAJOR="${VERSION_NO_V%%.*}"
+            MINOR="${VERSION_NO_V##*.}"
+            NEXT_TAG="v${MAJOR}.$((MINOR + 1))"
+          fi
+
+          echo "release_tag=${NEXT_TAG}" >> "${GITHUB_OUTPUT}"
+
+      - name: Publish GitHub Release
+        if: github.ref_name == 'main'
+        uses: softprops/action-gh-release@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Upload appliance to Azure Blob
-        run: |
-          az storage blob upload \
-            --account-name "${{ vars.AZURE_STORAGE_ACCOUNT }}" \
-            --container-name "${{ vars.AZURE_STORAGE_CONTAINER }}" \
-            --name "${{ steps.files.outputs.appliance_name }}" \
-            --file "${{ steps.files.outputs.appliance_file }}" \
-            --auth-mode login \
-            --overwrite true
-
-          az storage blob upload \
-            --account-name "${{ vars.AZURE_STORAGE_ACCOUNT }}" \
-            --container-name "${{ vars.AZURE_STORAGE_CONTAINER }}" \
-            --name "${{ steps.files.outputs.checksum_name }}" \
-            --file "${{ steps.files.outputs.checksum_file }}" \
-            --auth-mode login \
-            --overwrite true
-
-      - name: Print blob URLs
-        run: |
-          echo "Appliance uploaded:"
-          echo "https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}/${{ steps.files.outputs.appliance_name }}"
-          echo "https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}/${{ steps.files.outputs.checksum_name }}"
+          tag_name: ${{ steps.version.outputs.release_tag }}
+          name: ${{ steps.version.outputs.release_tag }}
+          target_commitish: ${{ github.sha }}
+          files: |
+            ${{ steps.files.outputs.appliance_file }}
+            ${{ steps.files.outputs.checksum_file }}
