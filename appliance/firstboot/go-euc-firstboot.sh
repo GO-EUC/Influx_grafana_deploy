@@ -471,59 +471,44 @@ set -euo pipefail
 TELEGRAF_PUBLIC_DIR="/opt/influx-grafana/public/telegraf"
 mkdir -p "${TELEGRAF_PUBLIC_DIR}"
 
-download_url="$(python3 - <<'PY'
-import json
-import re
-import urllib.request
+resolve_latest_telegraf_windows_url() {
+  local location=""
+  local tag=""
+  local version=""
+  local candidate=""
 
-HEADERS = {
-    "User-Agent": "go-euc-appliance/1.0",
-    "Accept": "application/vnd.github+json",
+  location="$(
+    curl -fsSLI -A "go-euc-appliance/1.0" "https://github.com/influxdata/telegraf/releases/latest" \
+      | awk 'BEGIN{IGNORECASE=1} /^location:/ {print $2}' \
+      | tr -d '\r' \
+      | tail -n1
+  )"
+
+  if [[ -z "${location}" ]]; then
+    return 1
+  fi
+
+  tag="${location##*/}"
+  version="${tag#v}"
+  if [[ -z "${tag}" || -z "${version}" ]]; then
+    return 1
+  fi
+
+  for candidate in \
+    "https://github.com/influxdata/telegraf/releases/download/${tag}/telegraf-${version}_windows_amd64.zip" \
+    "https://github.com/influxdata/telegraf/releases/download/${tag}/telegraf-${tag}_windows_amd64.zip" \
+    "https://dl.influxdata.com/telegraf/releases/telegraf-${version}_windows_amd64.zip"
+  do
+    if curl -fLSs -o /dev/null "${candidate}"; then
+      printf '%s' "${candidate}"
+      return 0
+    fi
+  done
+
+  return 1
 }
 
-def fetch_text(url, timeout=20):
-    req = urllib.request.Request(url, headers=HEADERS)
-    return urllib.request.urlopen(req, timeout=timeout).read().decode("utf-8", "ignore")
-
-def fetch_json(url, timeout=20):
-    return json.loads(fetch_text(url, timeout=timeout))
-
-def pick_latest_asset_url(data):
-    for asset in data.get("assets", []):
-        name = asset.get("name", "").lower()
-        url = asset.get("browser_download_url", "")
-        if "windows_amd64" in name and name.endswith(".zip") and url:
-            return url
-    return ""
-
-api = "https://api.github.com/repos/influxdata/telegraf/releases/latest"
-try:
-    data = fetch_json(api, timeout=20)
-    url = pick_latest_asset_url(data)
-    if url:
-        print(url)
-        raise SystemExit(0)
-except Exception:
-    pass
-
-releases_page = "https://github.com/influxdata/telegraf/releases"
-try:
-    html = fetch_text(releases_page, timeout=20)
-except Exception:
-    print("")
-    raise SystemExit(0)
-
-match = re.search(r'href="([^"]*telegraf[^"]*_windows_amd64[^"]*\.zip)"', html, re.IGNORECASE)
-if match:
-    href = match.group(1)
-    if href.startswith("/"):
-        href = f"https://github.com{href}"
-    print(href)
-    raise SystemExit(0)
-
-print("")
-PY
-)"
+download_url="$(resolve_latest_telegraf_windows_url || true)"
 
 if [[ -z "${download_url}" ]]; then
   echo "Unable to resolve latest Telegraf windows_amd64 release asset URL." >&2
