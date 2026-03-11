@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   build-and-publish:
@@ -46,22 +47,32 @@ jobs:
           echo "appliance_name=$(basename "${APPLIANCE_FILE}")" >> "${GITHUB_OUTPUT}"
           echo "checksum_name=$(basename "${CHECKSUM_FILE}")" >> "${GITHUB_OUTPUT}"
 
-      - name: Upload build artifact to GitHub
-        uses: actions/upload-artifact@v4
+      - name: Azure Login (OIDC)
+        if: github.ref_name == 'dev'
+        uses: azure/login@v2
         with:
-          name: appliance-ova
-          path: |
-            ${{ steps.files.outputs.appliance_file }}
-            ${{ steps.files.outputs.checksum_file }}
-            dist/virt-customize.log
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Upload debug log on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: appliance-debug-logs
-          path: |
-            dist/virt-customize.log
+      - name: Upload appliance to Azure Blob
+        if: github.ref_name == 'dev'
+        run: |
+          az storage blob upload \
+            --account-name "${{ vars.AZURE_STORAGE_ACCOUNT }}" \
+            --container-name "${{ vars.AZURE_STORAGE_CONTAINER }}" \
+            --name "${{ steps.files.outputs.appliance_name }}" \
+            --file "${{ steps.files.outputs.appliance_file }}" \
+            --auth-mode login \
+            --overwrite true
+
+          az storage blob upload \
+            --account-name "${{ vars.AZURE_STORAGE_ACCOUNT }}" \
+            --container-name "${{ vars.AZURE_STORAGE_CONTAINER }}" \
+            --name "${{ steps.files.outputs.checksum_name }}" \
+            --file "${{ steps.files.outputs.checksum_file }}" \
+            --auth-mode login \
+            --overwrite true
 
       - name: Create GitHub Release and upload assets
         if: github.ref_name == 'main'
