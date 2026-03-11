@@ -74,6 +74,13 @@ jobs:
             --auth-mode login \
             --overwrite true
 
+      - name: Print Azure Blob download URLs
+        if: github.ref_name == 'dev'
+        run: |
+          echo "Dev appliance uploaded:"
+          echo "https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}/${{ steps.files.outputs.appliance_name }}"
+          echo "https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}/${{ steps.files.outputs.checksum_name }}"
+
       - name: Create GitHub Release and upload assets
         if: github.ref_name == 'main'
         id: version
