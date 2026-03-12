@@ -5,8 +5,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+User=root
+Group=root
 WorkingDirectory=/opt/influx-grafana/public
-ExecStart=/usr/bin/python3 -m http.server 80 --directory /opt/influx-grafana/public
+ExecStart=/usr/bin/python3 /usr/local/bin/go-euc-webfiles.py
 Restart=always
 RestartSec=5
 StandardOutput=journal

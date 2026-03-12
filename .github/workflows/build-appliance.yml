@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   build-and-publish:
@@ -26,7 +27,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libguestfs-tools qemu-utils passt
 
-      - name: Build OVA appliance
+      - name: Build appliance images (OVA + VHD)
         env:
           LIBGUESTFS_BACKEND: direct
           LIBGUESTFS_DEBUG: "1"
@@ -39,29 +40,74 @@ jobs:
       - name: Capture artifact paths
         id: files
         run: |
-          APPLIANCE_FILE="$(ls -1 dist/*.ova | tail -n1)"
-          CHECKSUM_FILE="${APPLIANCE_FILE}.sha256"
-          echo "appliance_file=${APPLIANCE_FILE}" >> "${GITHUB_OUTPUT}"
-          echo "checksum_file=${CHECKSUM_FILE}" >> "${GITHUB_OUTPUT}"
-          echo "appliance_name=$(basename "${APPLIANCE_FILE}")" >> "${GITHUB_OUTPUT}"
-          echo "checksum_name=$(basename "${CHECKSUM_FILE}")" >> "${GITHUB_OUTPUT}"
+          OVA_FILE="$(ls -1 dist/*.ova | tail -n1)"
+          OVA_CHECKSUM_FILE="${OVA_FILE}.sha256"
+          VHD_FILE="$(ls -1 dist/*.vhd | tail -n1)"
+          VHD_CHECKSUM_FILE="${VHD_FILE}.sha256"
 
-      - name: Upload build artifact to GitHub
-        uses: actions/upload-artifact@v4
-        with:
-          name: appliance-ova
-          path: |
-            ${{ steps.files.outputs.appliance_file }}
-            ${{ steps.files.outputs.checksum_file }}
-            dist/virt-customize.log
+          echo "ova_file=${OVA_FILE}" >> "${GITHUB_OUTPUT}"
+          echo "ova_checksum_file=${OVA_CHECKSUM_FILE}" >> "${GITHUB_OUTPUT}"
+          echo "ova_name=$(basename "${OVA_FILE}")" >> "${GITHUB_OUTPUT}"
+          echo "ova_checksum_name=$(basename "${OVA_CHECKSUM_FILE}")" >> "${GITHUB_OUTPUT}"
 
-      - name: Upload debug log on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
+          echo "vhd_file=${VHD_FILE}" >> "${GITHUB_OUTPUT}"
+          echo "vhd_checksum_file=${VHD_CHECKSUM_FILE}" >> "${GITHUB_OUTPUT}"
+          echo "vhd_name=$(basename "${VHD_FILE}")" >> "${GITHUB_OUTPUT}"
+          echo "vhd_checksum_name=$(basename "${VHD_CHECKSUM_FILE}")" >> "${GITHUB_OUTPUT}"
+
+      - name: Azure Login (OIDC)
+        if: github.ref_name == 'dev'
+        uses: azure/login@v2
         with:
-          name: appliance-debug-logs
-          path: |
-            dist/virt-customize.log
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Upload appliance to Azure Blob
+        if: github.ref_name == 'dev'
+        run: |
+          az storage blob upload \
+            --account-name "${{ vars.AZURE_STORAGE_ACCOUNT }}" \
+            --container-name "${{ vars.AZURE_STORAGE_CONTAINER }}" \
+            --name "${{ steps.files.outputs.ova_name }}" \
+            --file "${{ steps.files.outputs.ova_file }}" \
+            --auth-mode login \
+            --overwrite true
+
+          az storage blob upload \
+            --account-name "${{ vars.AZURE_STORAGE_ACCOUNT }}" \
+            --container-name "${{ vars.AZURE_STORAGE_CONTAINER }}" \
+            --name "${{ steps.files.outputs.ova_checksum_name }}" \
+            --file "${{ steps.files.outputs.ova_checksum_file }}" \
+            --auth-mode login \
+            --overwrite true
+
+          az storage blob upload \
+            --account-name "${{ vars.AZURE_STORAGE_ACCOUNT }}" \
+            --container-name "${{ vars.AZURE_STORAGE_CONTAINER }}" \
+            --name "${{ steps.files.outputs.vhd_name }}" \
+            --file "${{ steps.files.outputs.vhd_file }}" \
+            --auth-mode login \
+            --overwrite true
+
+          az storage blob upload \
+            --account-name "${{ vars.AZURE_STORAGE_ACCOUNT }}" \
+            --container-name "${{ vars.AZURE_STORAGE_CONTAINER }}" \
+            --name "${{ steps.files.outputs.vhd_checksum_name }}" \
+            --file "${{ steps.files.outputs.vhd_checksum_file }}" \
+            --auth-mode login \
+            --overwrite true
+
+      - name: Print Azure Blob download URLs
+        if: github.ref_name == 'dev'
+        run: |
+          echo "Dev appliance images uploaded:"
+          echo "OVA:"
+          echo "https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}/${{ steps.files.outputs.ova_name }}"
+          echo "https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}/${{ steps.files.outputs.ova_checksum_name }}"
+          echo "VHD:"
+          echo "https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}/${{ steps.files.outputs.vhd_name }}"
+          echo "https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}/${{ steps.files.outputs.vhd_checksum_name }}"
 
       - name: Create GitHub Release and upload assets
         if: github.ref_name == 'main'
@@ -94,5 +140,7 @@ jobs:
           name: ${{ steps.version.outputs.release_tag }}
           target_commitish: ${{ github.sha }}
           files: |
-            ${{ steps.files.outputs.appliance_file }}
-            ${{ steps.files.outputs.checksum_file }}
+            ${{ steps.files.outputs.ova_file }}
+            ${{ steps.files.outputs.ova_checksum_file }}
+            ${{ steps.files.outputs.vhd_file }}
+            ${{ steps.files.outputs.vhd_checksum_file }}

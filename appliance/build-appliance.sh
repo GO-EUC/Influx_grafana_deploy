@@ -21,6 +21,7 @@ BUILD_ID="${BUILD_TS}-${GIT_SHA:0:8}"
 APPLIANCE_BASENAME="go-euc-appliance-${BUILD_ID}"
 QCOW2_PATH="${WORK_DIR}/${APPLIANCE_BASENAME}.qcow2"
 VMDK_PATH="${WORK_DIR}/${APPLIANCE_BASENAME}.vmdk"
+VHD_PATH="${OUTPUT_DIR}/${APPLIANCE_BASENAME}.vhd"
 OVF_PATH="${WORK_DIR}/${APPLIANCE_BASENAME}.ovf"
 OVA_PATH="${OUTPUT_DIR}/${APPLIANCE_BASENAME}.ova"
 
@@ -92,14 +93,16 @@ EOF" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-autogrow.sh:/usr/local/bin" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-autogrow.service:/etc/systemd/system" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-upgrade.sh:/usr/local/bin" \
+  --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-appliance-update.sh:/usr/local/bin" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-upgrade.service:/etc/systemd/system" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-upgrade.timer:/etc/systemd/system" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-webfiles.service:/etc/systemd/system" \
+  --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-webfiles.py:/usr/local/bin" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-ensure-ssh.sh:/usr/local/bin" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-ensure-ssh.service:/etc/systemd/system" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-postsetup-cleanup.sh:/usr/local/bin" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-postsetup-cleanup.service:/etc/systemd/system" \
-  --run-command "chmod +x /usr/local/bin/go-euc-firstboot.sh /usr/local/bin/go-euc-console-wizard.sh /usr/local/bin/go-euc-autogrow.sh /usr/local/bin/go-euc-upgrade.sh /usr/local/bin/go-euc-ensure-ssh.sh /usr/local/bin/go-euc-postsetup-cleanup.sh /opt/go-euc-installer/scripts/step1_install_base.sh /etc/profile.d/go-euc-login-hook.sh" \
+  --run-command "chmod +x /usr/local/bin/go-euc-firstboot.sh /usr/local/bin/go-euc-console-wizard.sh /usr/local/bin/go-euc-autogrow.sh /usr/local/bin/go-euc-upgrade.sh /usr/local/bin/go-euc-appliance-update.sh /usr/local/bin/go-euc-webfiles.py /usr/local/bin/go-euc-ensure-ssh.sh /usr/local/bin/go-euc-postsetup-cleanup.sh /opt/go-euc-installer/scripts/step1_install_base.sh /etc/profile.d/go-euc-login-hook.sh" \
   --run-command "ln -sf /etc/systemd/system/go-euc-firstboot.service /etc/systemd/system/multi-user.target.wants/go-euc-firstboot.service" \
   --run-command "ln -sf /etc/systemd/system/go-euc-autogrow.service /etc/systemd/system/multi-user.target.wants/go-euc-autogrow.service" \
   --run-command "ln -sf /etc/systemd/system/go-euc-ensure-ssh.service /etc/systemd/system/multi-user.target.wants/go-euc-ensure-ssh.service" \
@@ -115,6 +118,9 @@ EOF" \
 
 echo "Converting disk to VMDK for OVA..."
 qemu-img convert -O vmdk -o adapter_type=lsilogic,subformat=streamOptimized "${QCOW2_PATH}" "${VMDK_PATH}"
+
+echo "Converting disk to VHD for Hyper-V..."
+qemu-img convert -O vpc -o subformat=fixed "${QCOW2_PATH}" "${VHD_PATH}"
 
 echo "Creating OVF descriptor..."
 VMDK_SIZE_BYTES="$(wc -c < "${VMDK_PATH}" | tr -d ' ')"
@@ -201,10 +207,13 @@ echo "Packaging OVA..."
   tar -cf "${OVA_PATH}" "$(basename "${OVF_PATH}")" "$(basename "${VMDK_PATH}")"
 )
 
-echo "Generating checksum..."
+echo "Generating checksums..."
 sha256sum "${OVA_PATH}" | tee "${OVA_PATH}.sha256"
+sha256sum "${VHD_PATH}" | tee "${VHD_PATH}.sha256"
 
 echo
 echo "Build complete:"
 echo "- ${OVA_PATH}"
 echo "- ${OVA_PATH}.sha256"
+echo "- ${VHD_PATH}"
+echo "- ${VHD_PATH}.sha256"
