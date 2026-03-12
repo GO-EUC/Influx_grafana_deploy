@@ -100,7 +100,8 @@ Triggers:
 Release assets:
 
 - `go-euc-appliance-<timestamp>-<sha>.ova`
-- matching `.sha256`
+- `go-euc-appliance-<timestamp>-<sha>.vhd`
+- matching `.sha256` for each image format
 
 The workflow uses GitHub Releases (not Azure blob storage).
 

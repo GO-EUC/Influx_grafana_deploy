@@ -21,6 +21,7 @@ BUILD_ID="${BUILD_TS}-${GIT_SHA:0:8}"
 APPLIANCE_BASENAME="go-euc-appliance-${BUILD_ID}"
 QCOW2_PATH="${WORK_DIR}/${APPLIANCE_BASENAME}.qcow2"
 VMDK_PATH="${WORK_DIR}/${APPLIANCE_BASENAME}.vmdk"
+VHD_PATH="${OUTPUT_DIR}/${APPLIANCE_BASENAME}.vhd"
 OVF_PATH="${WORK_DIR}/${APPLIANCE_BASENAME}.ovf"
 OVA_PATH="${OUTPUT_DIR}/${APPLIANCE_BASENAME}.ova"
 
@@ -118,6 +119,9 @@ EOF" \
 echo "Converting disk to VMDK for OVA..."
 qemu-img convert -O vmdk -o adapter_type=lsilogic,subformat=streamOptimized "${QCOW2_PATH}" "${VMDK_PATH}"
 
+echo "Converting disk to VHD for Hyper-V..."
+qemu-img convert -O vpc -o subformat=fixed "${QCOW2_PATH}" "${VHD_PATH}"
+
 echo "Creating OVF descriptor..."
 VMDK_SIZE_BYTES="$(wc -c < "${VMDK_PATH}" | tr -d ' ')"
 cat > "${OVF_PATH}" <<EOF
@@ -203,10 +207,13 @@ echo "Packaging OVA..."
   tar -cf "${OVA_PATH}" "$(basename "${OVF_PATH}")" "$(basename "${VMDK_PATH}")"
 )
 
-echo "Generating checksum..."
+echo "Generating checksums..."
 sha256sum "${OVA_PATH}" | tee "${OVA_PATH}.sha256"
+sha256sum "${VHD_PATH}" | tee "${VHD_PATH}.sha256"
 
 echo
 echo "Build complete:"
 echo "- ${OVA_PATH}"
 echo "- ${OVA_PATH}.sha256"
+echo "- ${VHD_PATH}"
+echo "- ${VHD_PATH}.sha256"
