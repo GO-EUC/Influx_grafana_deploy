@@ -56,15 +56,15 @@ jobs:
           echo "vhd_checksum_name=$(basename "${VHD_CHECKSUM_FILE}")" >> "${GITHUB_OUTPUT}"
 
       - name: Azure Login (OIDC)
-        if: github.ref_name == 'dev'
+        if: github.ref_name == 'dev' || github.ref_name == 'main'
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Upload appliance to Azure Blob
-        if: github.ref_name == 'dev'
+      - name: Upload appliance images to Azure Blob
+        if: github.ref_name == 'dev' || github.ref_name == 'main'
         run: |
           az storage blob upload \
             --account-name "${{ vars.AZURE_STORAGE_ACCOUNT }}" \
@@ -99,9 +99,9 @@ jobs:
             --overwrite true
 
       - name: Print Azure Blob download URLs
-        if: github.ref_name == 'dev'
+        if: github.ref_name == 'dev' || github.ref_name == 'main'
         run: |
-          echo "Dev appliance images uploaded:"
+          echo "Appliance images uploaded to Azure Blob:"
           echo "OVA:"
           echo "https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}/${{ steps.files.outputs.ova_name }}"
           echo "https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}/${{ steps.files.outputs.ova_checksum_name }}"
@@ -139,8 +139,9 @@ jobs:
           tag_name: ${{ steps.version.outputs.release_tag }}
           name: ${{ steps.version.outputs.release_tag }}
           target_commitish: ${{ github.sha }}
-          files: |
-            ${{ steps.files.outputs.ova_file }}
-            ${{ steps.files.outputs.ova_checksum_file }}
-            ${{ steps.files.outputs.vhd_file }}
-            ${{ steps.files.outputs.vhd_checksum_file }}
+          body: |
+            Download links:
+            - OVA: https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}/${{ steps.files.outputs.ova_name }}
+            - OVA checksum: https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}/${{ steps.files.outputs.ova_checksum_name }}
+            - VHD: https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}/${{ steps.files.outputs.vhd_name }}
+            - VHD checksum: https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}/${{ steps.files.outputs.vhd_checksum_name }}
