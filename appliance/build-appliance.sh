@@ -15,6 +15,7 @@ UBUNTU_IMAGE_URL="${UBUNTU_IMAGE_URL:-https://cloud-images.ubuntu.com/noble/curr
 GIT_SHA="${GITHUB_SHA:-local}"
 BUILD_TS="$(date -u +%Y%m%d-%H%M%S)"
 DISK_SIZE_GB="${DISK_SIZE_GB:-100}"
+VHD_SUBFORMAT="${VHD_SUBFORMAT:-dynamic}"
 BREAK_GLASS_USER="${BREAK_GLASS_USER:-recovery}"
 BREAK_GLASS_PASSWORD="${BREAK_GLASS_PASSWORD:-Recover-ChangeMe-Now!}"
 BUILD_ID="${BUILD_TS}-${GIT_SHA:0:8}"
@@ -120,7 +121,15 @@ echo "Converting disk to VMDK for OVA..."
 qemu-img convert -O vmdk -o adapter_type=lsilogic,subformat=streamOptimized "${QCOW2_PATH}" "${VMDK_PATH}"
 
 echo "Converting disk to VHD for Hyper-V..."
-qemu-img convert -O vpc -o subformat=fixed "${QCOW2_PATH}" "${VHD_PATH}"
+case "${VHD_SUBFORMAT}" in
+  dynamic|fixed)
+    ;;
+  *)
+    echo "Unsupported VHD_SUBFORMAT='${VHD_SUBFORMAT}'. Use 'dynamic' or 'fixed'." >&2
+    exit 1
+    ;;
+esac
+qemu-img convert -O vpc -o "subformat=${VHD_SUBFORMAT}" "${QCOW2_PATH}" "${VHD_PATH}"
 
 echo "Creating OVF descriptor..."
 VMDK_SIZE_BYTES="$(wc -c < "${VMDK_PATH}" | tr -d ' ')"
