@@ -4,6 +4,7 @@ set -eEuo pipefail
 
 MARKER_FILE="/var/lib/go-euc/.installed"
 CONFIG_FILE="/etc/go-euc/config.env"
+REMOTE_DASHBOARDS_ZIP_URL="https://web.leeejeffries.com/Dashboards.zip"
 INSTALLER="/opt/go-euc-installer/scripts/step1_install_base.sh"
 LOCAL_DASHBOARD_ZIP="/opt/go-euc-installer/Dashboards.zip"
 LOG_FILE="/var/log/go-euc-install.log"
@@ -16,8 +17,6 @@ STATIC_NETPLAN_FILE="/etc/netplan/99-go-euc-appliance.yaml"
 PUBLIC_DIR="${INSTALL_ROOT}/public"
 PUBLIC_CONFIG_FILE="${PUBLIC_DIR}/config.txt"
 PUBLIC_INDEX_FILE="${PUBLIC_DIR}/index.html"
-PUBLIC_CGI_DIR="${PUBLIC_DIR}/cgi-bin"
-PUBLIC_TELEGRAF_REFRESH_CGI="${PUBLIC_CGI_DIR}/fetch-telegraf.sh"
 DELETE_CONFIG_BOOTID_FILE="/var/lib/go-euc/delete-config-after-bootid"
 CONSOLE_CONFIG_MARKER="/var/lib/go-euc/console-config.done"
 TELEGRAF_SOURCE_DIR="/opt/go-euc-installer/Telegraf"
@@ -439,6 +438,10 @@ if [[ -f "${CONFIG_FILE}" ]]; then
   source "${CONFIG_FILE}"
 fi
 
+# Persist source dashboard URL for post-install update flows.
+echo "${REMOTE_DASHBOARDS_ZIP_URL}" > /etc/go-euc/dashboard-url
+chmod 644 /etc/go-euc/dashboard-url
+
 create_appliance_login
 if [[ ! -f "${CONSOLE_CONFIG_MARKER}" ]]; then
   write_issue_status "PENDING-CONSOLE-CONFIG" "Log in on console to run the initial hostname/IP wizard."
@@ -462,7 +465,6 @@ configure_upgrade_timer() {
 
 configure_web_file_host() {
   mkdir -p "${PUBLIC_DIR}"
-  mkdir -p "${PUBLIC_CGI_DIR}"
 
   cat > "${TELEGRAF_REFRESH_SCRIPT}" <<'EOF'
 #!/usr/bin/env bash
@@ -472,10 +474,39 @@ TELEGRAF_PUBLIC_DIR="/opt/influx-grafana/public/telegraf"
 mkdir -p "${TELEGRAF_PUBLIC_DIR}"
 
 resolve_latest_telegraf_windows_url() {
+  local api_json=""
+  local api_url=""
   local location=""
   local tag=""
   local version=""
   local candidate=""
+
+  api_json="$(curl -fsSL -A "go-euc-appliance/1.0" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/influxdata/telegraf/releases/latest" || true)"
+  if [[ -n "${api_json}" ]]; then
+    api_url="$(
+      printf '%s' "${api_json}" | python3 - <<'PY'
+import json
+import sys
+payload = sys.stdin.read()
+try:
+    data = json.loads(payload)
+except Exception:
+    print("")
+    raise SystemExit(0)
+for asset in data.get("assets", []):
+    name = str(asset.get("name", "")).lower()
+    url = str(asset.get("browser_download_url", ""))
+    if "windows_amd64" in name and name.endswith(".zip") and url:
+        print(url)
+        raise SystemExit(0)
+print("")
+PY
+    )"
+    if [[ -n "${api_url}" ]]; then
+      printf '%s' "${api_url}"
+      return 0
+    fi
+  fi
 
   location="$(
     curl -fsSLI -A "go-euc-appliance/1.0" "https://github.com/influxdata/telegraf/releases/latest" \
@@ -483,23 +514,14 @@ resolve_latest_telegraf_windows_url() {
       | tr -d '\r' \
       | tail -n1
   )"
-
-  if [[ -z "${location}" ]]; then
-    return 1
-  fi
-
   tag="${location##*/}"
   version="${tag#v}"
-  if [[ -z "${tag}" || -z "${version}" ]]; then
-    return 1
-  fi
 
   for candidate in \
     "https://github.com/influxdata/telegraf/releases/download/${tag}/telegraf-${version}_windows_amd64.zip" \
-    "https://github.com/influxdata/telegraf/releases/download/${tag}/telegraf-${tag}_windows_amd64.zip" \
     "https://dl.influxdata.com/telegraf/releases/telegraf-${version}_windows_amd64.zip"
   do
-    if curl -fLSs -o /dev/null "${candidate}"; then
+    if [[ -n "${tag}" && -n "${version}" ]] && curl -fLSs -o /dev/null "${candidate}"; then
       printf '%s' "${candidate}"
       return 0
     fi
@@ -524,7 +546,8 @@ if ! curl -fLSs "${download_url}" -o "${tmp_pkg}"; then
   exit 1
 fi
 
-mv -f "${tmp_pkg}" "${output_pkg}"
+install -m 0644 "${tmp_pkg}" "${output_pkg}"
+rm -f "${tmp_pkg}" || true
 cp -f "${output_pkg}" "${TELEGRAF_PUBLIC_DIR}/telegraf_windows_amd64_latest.zip" || true
 
 python3 - "${output_pkg}" "${TELEGRAF_PUBLIC_DIR}/telegraf.exe" <<'PY'
@@ -552,28 +575,6 @@ echo "Extracted: ${TELEGRAF_PUBLIC_DIR}/telegraf.exe"
 EOF
   chmod 755 "${TELEGRAF_REFRESH_SCRIPT}"
 
-  cat > "${PUBLIC_TELEGRAF_REFRESH_CGI}" <<'EOF'
-#!/usr/bin/env bash
-set -uo pipefail
-
-echo "Content-Type: text/plain"
-echo
-
-if /usr/local/bin/go-euc-refresh-telegraf.sh 2>&1; then
-  echo
-  echo "Refresh completed."
-else
-  rc="$?"
-  echo
-  echo "Refresh failed with exit code ${rc}."
-fi
-
-echo
-echo "Current /telegraf files:"
-ls -1 /opt/influx-grafana/public/telegraf 2>/dev/null || true
-EOF
-  chmod 755 "${PUBLIC_TELEGRAF_REFRESH_CGI}"
-
   cat > "${PUBLIC_INDEX_FILE}" <<'EOF'
 <!doctype html>
 <html lang="en">
@@ -595,19 +596,22 @@ EOF
     <a href="/config.txt">View config.txt</a>
   </p>
   <button id="refreshBtn" type="button">Fetch latest Telegraf Windows package</button>
+  <button id="fullUpdateBtn" type="button">Run Full Appliance Update</button>
   <p id="status"></p>
   <pre id="output">Click the button to fetch/update Telegraf package and telegraf.exe.</pre>
   <script>
     const btn = document.getElementById('refreshBtn');
+    const fullUpdateBtn = document.getElementById('fullUpdateBtn');
     const status = document.getElementById('status');
     const output = document.getElementById('output');
 
     btn.addEventListener('click', async () => {
       btn.disabled = true;
+      fullUpdateBtn.disabled = true;
       status.textContent = 'Refreshing package...';
       output.textContent = '';
       try {
-        const res = await fetch('/cgi-bin/fetch-telegraf.sh', { method: 'POST' });
+        const res = await fetch('/api/refresh-telegraf', { method: 'POST' });
         output.textContent = await res.text();
         status.textContent = res.ok ? 'Refresh request completed.' : 'Refresh request returned an error.';
       } catch (err) {
@@ -615,6 +619,25 @@ EOF
         output.textContent = String(err);
       } finally {
         btn.disabled = false;
+        fullUpdateBtn.disabled = false;
+      }
+    });
+
+    fullUpdateBtn.addEventListener('click', async () => {
+      btn.disabled = true;
+      fullUpdateBtn.disabled = true;
+      status.textContent = 'Running full appliance update (this can take a while)...';
+      output.textContent = '';
+      try {
+        const res = await fetch('/api/full-update', { method: 'POST' });
+        output.textContent = await res.text();
+        status.textContent = res.ok ? 'Full update completed.' : 'Full update returned an error.';
+      } catch (err) {
+        status.textContent = 'Full update request failed.';
+        output.textContent = String(err);
+      } finally {
+        btn.disabled = false;
+        fullUpdateBtn.disabled = false;
       }
     });
   </script>

@@ -76,7 +76,14 @@ The built-in web file host serves `/opt/influx-grafana/public/`, including:
 - Influx URL (`http://<appliance-ip>:8086`)
 - generated Influx token
 
-The default web page (`http://<appliance-ip>/`) includes a **Fetch latest Telegraf Windows package** button that triggers an on-demand refresh and repopulates `/telegraf/`.
+The default web page (`http://<appliance-ip>/`) includes a **Fetch latest Telegraf Windows package** button that triggers an on-demand refresh API (`POST /api/refresh-telegraf`) and repopulates `/telegraf/`.
+
+The same page also includes **Run Full Appliance Update** (`POST /api/full-update`) which performs:
+
+- Ubuntu package update/upgrade on the VM
+- container image refresh/redeploy (`influxdb`, `grafana`, `portainer`)
+- dashboard bundle refresh from configured dashboard URL
+- Telegraf package/executable refresh in `/telegraf/`
 
 For Windows install steps, see `Telegraf/WINDOWS_INSTALL.md`.
 
