@@ -113,4 +113,6 @@ From repo root:
 bash appliance/build-appliance.sh
 ```
 
+The appliance image is customized during build using `virt-customize` from libguestfs: [virt-customize documentation](https://libguestfs.org/virt-customize.1.html).
+
 Output is written to `dist/`.

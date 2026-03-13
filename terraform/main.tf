@@ -59,7 +59,7 @@ resource "azuread_service_principal" "github_actions" {
 resource "azuread_application_federated_identity_credential" "github_actions" {
   for_each = toset(local.effective_federated_subjects)
 
-  application_object_id = azuread_application.github_actions.object_id
+  application_id        = azuread_application.github_actions.id
   display_name          = "gh-${replace(replace(each.value, ":", "-"), "/", "-")}"
   description           = "GitHub Actions OIDC subject ${each.value}"
   audiences             = ["api://AzureADTokenExchange"]
