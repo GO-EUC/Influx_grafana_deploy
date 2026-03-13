@@ -68,6 +68,8 @@ The built-in web file host serves `/opt/influx-grafana/public/`, including:
 - `/telegraf/telegraf.exe` (extracted from the downloaded zip for direct download)
 - `/telegraf/telegraf.conf`
 - `/telegraf/telegraf_vsphere.conf`
+- `/telegraf/WINDOWS_INSTALL.md` (Windows deployment instructions)
+- `/telegraf/WINDOWS_INSTALL.html` (browser-friendly rendered view of the instructions)
 - `/config.txt` (temporary post-install config summary)
 
 `telegraf.conf` files are tokenized at runtime with:

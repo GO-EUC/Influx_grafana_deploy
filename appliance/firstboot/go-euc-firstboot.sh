@@ -656,11 +656,65 @@ publish_telegraf_files() {
   local influx_token="$3"
   local telegraf_url="http://${host_ip}:8086"
   local conf_file=""
+  local install_md_source="${TELEGRAF_SOURCE_DIR}/WINDOWS_INSTALL.md"
+  local install_md_dest="${TELEGRAF_PUBLIC_DIR}/WINDOWS_INSTALL.md"
+  local install_html_dest="${TELEGRAF_PUBLIC_DIR}/WINDOWS_INSTALL.html"
 
   mkdir -p "${TELEGRAF_PUBLIC_DIR}"
 
   if [[ -d "${TELEGRAF_SOURCE_DIR}" ]]; then
     cp -f "${TELEGRAF_SOURCE_DIR}"/*.conf "${TELEGRAF_PUBLIC_DIR}/" 2>/dev/null || true
+  fi
+
+  if [[ -f "${install_md_source}" ]]; then
+    cp -f "${install_md_source}" "${install_md_dest}"
+    chmod 644 "${install_md_dest}" || true
+
+    cat > "${install_html_dest}" <<'EOF'
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Telegraf Windows Install</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2rem; line-height: 1.6; max-width: 1000px; }
+    .links a { display: inline-block; margin-right: 1rem; }
+    pre { background: #f6f8fa; padding: 1rem; border: 1px solid #d0d7de; border-radius: 6px; overflow: auto; }
+    code { background: #f6f8fa; padding: 0.1rem 0.25rem; border-radius: 4px; }
+    h1, h2, h3 { margin-top: 1.5rem; }
+  </style>
+</head>
+<body>
+  <h1>Telegraf Windows Install</h1>
+  <p class="links">
+    <a href="/telegraf/">Back to /telegraf/</a>
+    <a href="/telegraf/WINDOWS_INSTALL.md">Raw markdown</a>
+  </p>
+  <div id="content">Loading documentation...</div>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script>
+    (async () => {
+      const content = document.getElementById('content');
+      try {
+        const res = await fetch('/telegraf/WINDOWS_INSTALL.md', { cache: 'no-store' });
+        const md = await res.text();
+        if (window.marked && typeof window.marked.parse === 'function') {
+          content.innerHTML = window.marked.parse(md);
+        } else {
+          content.innerHTML = '<pre></pre>';
+          content.querySelector('pre').textContent = md;
+        }
+      } catch (err) {
+        content.innerHTML = '<pre></pre>';
+        content.querySelector('pre').textContent = String(err);
+      }
+    })();
+  </script>
+</body>
+</html>
+EOF
+    chmod 644 "${install_html_dest}" || true
   fi
 
   for conf_file in "${TELEGRAF_PUBLIC_DIR}"/*.conf; do
