@@ -72,7 +72,7 @@ INFLUX_BUCKET_TESTS="${INFLUX_BUCKET_TESTS:-Tests}"
 GRAFANA_ADMIN_USER="${GRAFANA_ADMIN_USER:-${SAVED_GRAFANA_ADMIN_USER:-admin}}"
 GRAFANA_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-${SAVED_GRAFANA_ADMIN_PASSWORD:-$(generate_secret 20)}}"
 # Hardcoded dashboard bundle URL (version-controlled artifact location).
-DASHBOARDS_ZIP_URL="https://web.leeejeffries.com/Dashboards.zip"
+DASHBOARDS_ZIP_URL="https://goeucartifacts4hiu9i.blob.core.windows.net/files/Dashboards.zip"
 GRAFANA_DATASOURCE_NAME="DS_GO"
 GRAFANA_DATASOURCE_UID="DS_GO"
 

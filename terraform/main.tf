@@ -42,6 +42,12 @@ resource "azurerm_storage_container" "appliances" {
   container_access_type = "blob"
 }
 
+resource "azurerm_storage_container" "files" {
+  name                  = "files"
+  storage_account_name  = azurerm_storage_account.artifacts.name
+  container_access_type = "blob"
+}
+
 resource "azuread_application" "github_actions" {
   display_name = "gh-${var.github_org}-${var.github_repo}-appliance-upload"
 }

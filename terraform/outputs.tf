@@ -23,6 +23,11 @@ output "azure_storage_container" {
   value       = azurerm_storage_container.appliances.name
 }
 
+output "azure_storage_files_container" {
+  description = "Files container for dashboards and supporting build artifacts."
+  value       = azurerm_storage_container.files.name
+}
+
 output "federated_subjects" {
   description = "GitHub OIDC subjects currently allowed in the Entra app."
   value       = local.effective_federated_subjects
