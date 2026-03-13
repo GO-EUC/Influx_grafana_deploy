@@ -109,7 +109,7 @@ jobs:
           echo "https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}/${{ steps.files.outputs.vhd_name }}"
           echo "https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}/${{ steps.files.outputs.vhd_checksum_name }}"
 
-      - name: Create GitHub Release and upload assets
+      - name: Compute GitHub release version
         if: github.ref_name == 'main'
         id: version
         run: |
@@ -132,7 +132,7 @@ jobs:
 
           echo "release_tag=${NEXT_TAG}" >> "${GITHUB_OUTPUT}"
 
-      - name: Publish GitHub Release
+      - name: Publish GitHub Release (Azure links only)
         if: github.ref_name == 'main'
         uses: softprops/action-gh-release@v2
         with:

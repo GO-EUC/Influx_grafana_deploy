@@ -4,7 +4,7 @@ set -eEuo pipefail
 
 MARKER_FILE="/var/lib/go-euc/.installed"
 CONFIG_FILE="/etc/go-euc/config.env"
-REMOTE_DASHBOARDS_ZIP_URL="https://web.leeejeffries.com/Dashboards.zip"
+REMOTE_DASHBOARDS_ZIP_URL="https://goeucartifacts4hiu9i.blob.core.windows.net/files/Dashboards.zip"
 INSTALLER="/opt/go-euc-installer/scripts/step1_install_base.sh"
 LOCAL_DASHBOARD_ZIP="/opt/go-euc-installer/Dashboards.zip"
 LOG_FILE="/var/log/go-euc-install.log"
