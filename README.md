@@ -88,6 +88,7 @@ The default web page (`https://<appliance-ip>/`) includes a **Fetch latest Teleg
 The same page also includes **Run Full Appliance Update** (`POST /api/full-update`) which performs:
 
 - Ubuntu package update/upgrade on the VM
+- migration of legacy compose files to include nginx reverse proxy + GO-EUC web services when missing
 - container image refresh/redeploy (`influxdb`, `grafana`, `portainer`, `goeuc/webserver`)
 - dashboard bundle refresh from configured dashboard URL
 - Telegraf package/executable refresh in `/telegraf/`

@@ -11,6 +11,8 @@ DASHBOARDS_URL_DEFAULT="https://goeucartifacts4hiu9i.blob.core.windows.net/files
 REFRESH_TELEGRAF_SCRIPT="/usr/local/bin/go-euc-refresh-telegraf.sh"
 CONTAINER_UPGRADE_SCRIPT="/usr/local/bin/go-euc-upgrade.sh"
 DASHBOARD_URL_CONFIG_FILE="/etc/go-euc/dashboard-url"
+STACK_FILE="${STACK_DIR}/docker-compose.yml"
+INSTALLER_SCRIPT="/opt/go-euc-installer/scripts/step1_install_base.sh"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "[full-update] Please run as root." >&2
@@ -26,6 +28,33 @@ fi
 
 exec > >(tee -a "${LOG_FILE}") 2>&1
 
+ensure_reverse_proxy_stack() {
+  local missing="false"
+
+  if [[ ! -f "${STACK_FILE}" ]]; then
+    missing="true"
+  else
+    if ! grep -Eq '^[[:space:]]nginx:[[:space:]]*$' "${STACK_FILE}"; then
+      missing="true"
+    fi
+    if ! grep -Eq '^[[:space:]]goeucweb:[[:space:]]*$' "${STACK_FILE}"; then
+      missing="true"
+    fi
+  fi
+
+  if [[ "${missing}" != "true" ]]; then
+    return 0
+  fi
+
+  echo "[full-update] Legacy compose detected (missing nginx/goeucweb). Running installer migration..."
+  if [[ ! -x "${INSTALLER_SCRIPT}" ]]; then
+    echo "[full-update] Installer script missing or not executable: ${INSTALLER_SCRIPT}" >&2
+    exit 1
+  fi
+
+  "${INSTALLER_SCRIPT}"
+}
+
 echo "[full-update] ==================================================="
 echo "[full-update] Start: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
@@ -34,6 +63,9 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
 apt-get upgrade -y
 apt-get autoremove -y
+
+echo "[full-update] Ensuring stack includes nginx reverse proxy services..."
+ensure_reverse_proxy_stack
 
 echo "[full-update] Updating container images/services..."
 "${CONTAINER_UPGRADE_SCRIPT}"
@@ -66,9 +98,9 @@ for dashboard in "${DASHBOARDS_DIR}"/**/*.json; do
 done
 shopt -u globstar nullglob
 
-if [[ -f "${STACK_DIR}/docker-compose.yml" ]]; then
+if [[ -f "${STACK_FILE}" ]]; then
   echo "[full-update] Restarting Grafana to reload dashboards..."
-  docker compose -f "${STACK_DIR}/docker-compose.yml" restart grafana || true
+  docker compose -f "${STACK_FILE}" restart grafana || true
 fi
 
 echo "[full-update] Refreshing latest Telegraf package..."
