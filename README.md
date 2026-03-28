@@ -23,7 +23,7 @@ The appliance is built from Ubuntu Noble cloud image and includes:
   - `go-euc-firstboot.service` (main provisioning orchestrator)
   - `go-euc-autogrow.service` (disk/filesystem growth fallback)
   - `go-euc-ensure-ssh.service` (SSH availability safety net)
-  - `go-euc-webfiles.service` (port 80 file host)
+  - `go-euc-webfiles.service` (local API backend behind nginx)
 - credential and status output:
   - `/opt/influx-grafana/credentials.env`
   - `/opt/influx-grafana/install-summary.txt`
@@ -54,14 +54,18 @@ Optional: you can pre-seed or manually edit `/etc/go-euc/config.env` using `appl
 
 ## Service endpoints after provisioning
 
-- Portainer: `https://<appliance-ip>:9443`
-- InfluxDB: `http://<appliance-ip>:8086`
-- Grafana: `http://<appliance-ip>:3000`
-- Web file host: `http://<appliance-ip>:80`
+- Appliance landing page: `https://<appliance-ip>/`
+- Portainer: `https://<appliance-ip>/portainer/`
+- InfluxDB: `https://<appliance-ip>/influx/`
+- Grafana: `https://<appliance-ip>/grafana/`
+- Legacy direct access remains available:
+  - Portainer: `https://<appliance-ip>:9443`
+  - InfluxDB: `http://<appliance-ip>:8086/influx/`
+  - Grafana: `http://<appliance-ip>:3000/grafana/`
 
-## Telegraf download over web UI (port 80)
+## Telegraf download over appliance web UI (HTTPS)
 
-The built-in web file host serves `/opt/influx-grafana/public/`, including:
+Dockerized nginx serves `/opt/influx-grafana/public/`, including:
 
 - `/telegraf/telegraf-*_windows_amd64.zip` (latest Telegraf Windows x64 package)
 - `/telegraf/telegraf_windows_amd64_latest.zip` (stable filename pointer to latest package)
@@ -70,15 +74,15 @@ The built-in web file host serves `/opt/influx-grafana/public/`, including:
 - `/telegraf/telegraf_vsphere.conf`
 - `/telegraf/WINDOWS_INSTALL.md` (Windows deployment instructions)
 - `/telegraf/WINDOWS_INSTALL.html` (browser-friendly rendered view of the instructions)
-- `/config.txt` (temporary post-install config summary)
+- `/config.txt` (persistent post-install config summary with service endpoints)
 
 `telegraf.conf` files are tokenized at runtime with:
 
 - Influx org
-- Influx URL (`http://<appliance-ip>:8086`)
+- Influx URL (`https://<appliance-ip>/influx`)
 - generated Influx token
 
-The default web page (`http://<appliance-ip>/`) includes a **Fetch latest Telegraf Windows package** button that triggers an on-demand refresh API (`POST /api/refresh-telegraf`) and repopulates `/telegraf/`.
+The default web page (`https://<appliance-ip>/`) includes a **Fetch latest Telegraf Windows package** button that triggers an on-demand refresh API (`POST /api/refresh-telegraf`) and repopulates `/telegraf/`.
 
 The same page also includes **Run Full Appliance Update** (`POST /api/full-update`) which performs:
 
@@ -86,6 +90,24 @@ The same page also includes **Run Full Appliance Update** (`POST /api/full-updat
 - container image refresh/redeploy (`influxdb`, `grafana`, `portainer`)
 - dashboard bundle refresh from configured dashboard URL
 - Telegraf package/executable refresh in `/telegraf/`
+
+It also includes **Renew Let's Encrypt Certificate** (`POST /api/renew-letsencrypt`) when Let's Encrypt settings are configured.
+It also includes a **Let's Encrypt Setup** web form that accepts domain/email, writes them to appliance config, and immediately attempts certificate request + apply (`POST /api/configure-letsencrypt`).
+
+## TLS certificates
+
+The nginx front end always serves HTTPS and starts with a generated self-signed certificate.
+
+Optional Let's Encrypt automation is enabled when both values are set in `/etc/go-euc/config.env`:
+
+- `APPLIANCE_LETSENCRYPT_DOMAIN=appliance.example.com`
+- `APPLIANCE_LETSENCRYPT_EMAIL=admin@example.com`
+
+When configured:
+
+- first-boot attempts automatic certificate issuance
+- cert renewal is available from the web UI button
+- the active nginx certificate switches from self-signed to Let's Encrypt
 
 For Windows install steps, see `Telegraf/WINDOWS_INSTALL.md`.
 

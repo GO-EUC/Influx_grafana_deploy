@@ -41,6 +41,9 @@ INSTALL_ROOT="/opt/influx-grafana"
 STACK_DIR="${INSTALL_ROOT}/stack"
 NETWORK_NAME="monitoring_net"
 CREDENTIALS_FILE="${INSTALL_ROOT}/credentials.env"
+NGINX_CONF_DIR="${INSTALL_ROOT}/nginx/conf.d"
+NGINX_CERT_DIR="${INSTALL_ROOT}/nginx/certs"
+NGINX_ACME_WEBROOT="${INSTALL_ROOT}/nginx/acme"
 
 # Load previously generated credentials/settings so reruns are stable.
 if [[ -f "${CREDENTIALS_FILE}" ]]; then
@@ -278,18 +281,35 @@ if ! docker ps -a --format '{{.Names}}' | grep -q '^portainer$'; then
   docker run -d \
     --name portainer \
     --restart=always \
+    --network "${NETWORK_NAME}" \
     -p 8000:8000 \
     -p 9443:9443 \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v portainer_data:/data \
-    portainer/portainer-ce:latest >/dev/null
+    portainer/portainer-ce:latest \
+    --base-url /portainer >/dev/null
+fi
+
+if ! docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{printf "%s " $k}}{{end}}' portainer 2>/dev/null | grep -q "${NETWORK_NAME}"; then
+  echo "==> Recreating Portainer to attach ${NETWORK_NAME}"
+  docker rm -f portainer >/dev/null 2>&1 || true
+  docker run -d \
+    --name portainer \
+    --restart=always \
+    --network "${NETWORK_NAME}" \
+    -p 8000:8000 \
+    -p 9443:9443 \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -v portainer_data:/data \
+    portainer/portainer-ce:latest \
+    --base-url /portainer >/dev/null
 fi
 
 # Wait for Portainer API before attempting admin user initialization.
 echo "==> Initializing Portainer admin credentials"
 PORTAINER_READY=0
 for _ in $(seq 1 60); do
-  if curl -sk --max-time 2 "https://localhost:9443/api/status" >/dev/null; then
+  if curl -sk --max-time 2 "https://localhost:9443/api/status" >/dev/null || curl -sk --max-time 2 "https://localhost:9443/portainer/api/status" >/dev/null; then
     PORTAINER_READY=1
     break
   fi
@@ -297,6 +317,7 @@ for _ in $(seq 1 60); do
 done
 
 if [[ "${PORTAINER_READY}" -eq 1 ]]; then
+  PORTAINER_INIT_CODE="000"
   PORTAINER_INIT_CODE="$(
     curl -sk \
       -o /tmp/portainer-init.json \
@@ -305,6 +326,16 @@ if [[ "${PORTAINER_READY}" -eq 1 ]]; then
       -X POST "https://localhost:9443/api/users/admin/init" \
       -d "{\"Username\":\"${PORTAINER_ADMIN_USER}\",\"Password\":\"${PORTAINER_ADMIN_PASSWORD}\"}"
   )"
+  if [[ "${PORTAINER_INIT_CODE}" != "200" && "${PORTAINER_INIT_CODE}" != "409" && "${PORTAINER_INIT_CODE}" != "422" ]]; then
+    PORTAINER_INIT_CODE="$(
+      curl -sk \
+        -o /tmp/portainer-init.json \
+        -w '%{http_code}' \
+        -H "Content-Type: application/json" \
+        -X POST "https://localhost:9443/portainer/api/users/admin/init" \
+        -d "{\"Username\":\"${PORTAINER_ADMIN_USER}\",\"Password\":\"${PORTAINER_ADMIN_PASSWORD}\"}"
+    )"
+  fi
 
   case "${PORTAINER_INIT_CODE}" in
     200)
@@ -330,6 +361,7 @@ mkdir -p "${STACK_DIR}"/{grafana,influxdb}
 mkdir -p "${STACK_DIR}/grafana/data" "${STACK_DIR}/influxdb/data" "${STACK_DIR}/influxdb/config"
 mkdir -p "${STACK_DIR}/grafana/provisioning/datasources"
 mkdir -p "${STACK_DIR}/grafana/provisioning/dashboards" "${STACK_DIR}/grafana/dashboards"
+mkdir -p "${NGINX_CONF_DIR}" "${NGINX_CERT_DIR}" "${NGINX_ACME_WEBROOT}"
 chown -R 472:472 "${STACK_DIR}/grafana/data" || true
 
 # Grafana datasource provisioning file (InfluxDB/Flux).
@@ -396,6 +428,7 @@ services:
       DOCKER_INFLUXDB_INIT_ORG: "${INFLUX_ADMIN_ORG}"
       DOCKER_INFLUXDB_INIT_BUCKET: "${INFLUX_INIT_BUCKET}"
       DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: "${INFLUX_ADMIN_TOKEN}"
+      INFLUXD_HTTP_BASE_PATH: "/influx"
     networks:
       - monitoring_net
 
@@ -412,10 +445,32 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER}"
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD}"
+      GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s/grafana/"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
     networks:
       - monitoring_net
     depends_on:
       - influxdb
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: goeuc-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ${INSTALL_ROOT}/public:/usr/share/nginx/html:ro
+      - ${NGINX_CONF_DIR}/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${NGINX_CERT_DIR}:/etc/nginx/certs:ro
+      - ${NGINX_ACME_WEBROOT}:/var/www/acme:rw
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - monitoring_net
+    depends_on:
+      - influxdb
+      - grafana
 
 networks:
   monitoring_net:
@@ -430,7 +485,7 @@ docker compose -f "${STACK_DIR}/docker-compose.yml" up -d
 docker compose -f "${STACK_DIR}/docker-compose.yml" restart grafana >/dev/null 2>&1 || true
 
 echo "==> Waiting for InfluxDB and Grafana readiness"
-if wait_for_http "http://localhost:8086/health" "200" 90 2; then
+if wait_for_http "http://localhost:8086/influx/health" "200" 90 2 || wait_for_http "http://localhost:8086/health" "200" 90 2; then
   INFLUX_STATUS="ready"
   # Ensure required business buckets exist every run.
   echo "==> Ensuring required Influx buckets exist"
@@ -453,18 +508,22 @@ fi
 # --- Final summary and operator-facing output ---
 echo
 echo "Install complete."
-echo "- Portainer: https://<vm-ip>:9443"
+echo "- Web UI (HTTPS): https://<vm-ip>/"
+echo "- Grafana: https://<vm-ip>/grafana/"
+echo "- InfluxDB: https://<vm-ip>/influx/"
+echo "- Portainer: https://<vm-ip>/portainer/"
+echo "- Portainer direct: https://<vm-ip>:9443"
 echo "  - username: ${PORTAINER_ADMIN_USER}"
 echo "  - password: ${PORTAINER_ADMIN_PASSWORD}"
 echo "  - status:   ${PORTAINER_CREDS_STATUS}"
-echo "- InfluxDB:  http://<vm-ip>:8086"
+echo "- InfluxDB direct: http://<vm-ip>:8086/influx/"
 echo "  - username: ${INFLUX_ADMIN_USER}"
 echo "  - password: ${INFLUX_ADMIN_PASSWORD}"
 echo "  - org:      ${INFLUX_ADMIN_ORG}"
 echo "  - buckets:  ${INFLUX_BUCKET_PERFORMANCE}, ${INFLUX_BUCKET_TESTS}"
 echo "  - token:    ${INFLUX_ADMIN_TOKEN}"
 echo "  - status:   ${INFLUX_STATUS}"
-echo "- Grafana:   http://<vm-ip>:3000"
+echo "- Grafana direct: http://<vm-ip>:3000/grafana/"
 echo "  - username: ${GRAFANA_ADMIN_USER}"
 echo "  - password: ${GRAFANA_ADMIN_PASSWORD}"
 echo "  - dashboard ZIP URL: ${DASHBOARDS_ZIP_URL:-<not-set>}"

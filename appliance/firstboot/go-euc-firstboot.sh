@@ -17,11 +17,16 @@ STATIC_NETPLAN_FILE="/etc/netplan/99-go-euc-appliance.yaml"
 PUBLIC_DIR="${INSTALL_ROOT}/public"
 PUBLIC_CONFIG_FILE="${PUBLIC_DIR}/config.txt"
 PUBLIC_INDEX_FILE="${PUBLIC_DIR}/index.html"
-DELETE_CONFIG_BOOTID_FILE="/var/lib/go-euc/delete-config-after-bootid"
 CONSOLE_CONFIG_MARKER="/var/lib/go-euc/console-config.done"
 TELEGRAF_SOURCE_DIR="/opt/go-euc-installer/Telegraf"
 TELEGRAF_PUBLIC_DIR="${PUBLIC_DIR}/telegraf"
 TELEGRAF_REFRESH_SCRIPT="/usr/local/bin/go-euc-refresh-telegraf.sh"
+LE_RENEW_SCRIPT="/usr/local/bin/go-euc-renew-letsencrypt.sh"
+NGINX_CERT_SETUP_SCRIPT="/usr/local/bin/go-euc-nginx-cert-setup.sh"
+NGINX_DIR="${INSTALL_ROOT}/nginx"
+NGINX_CONF_DIR="${NGINX_DIR}/conf.d"
+NGINX_CERT_DIR="${NGINX_DIR}/certs"
+NGINX_ACME_WEBROOT="${NGINX_DIR}/acme"
 
 mkdir -p /var/lib/go-euc /etc/go-euc "${INSTALL_ROOT}"
 
@@ -213,18 +218,18 @@ Appliance Login
   Password: ${APPLIANCE_LOGIN_PASSWORD_RESOLVED}
 
 Portainer
-  URL:      https://${host_ip}:9443
+  URL:      https://${host_ip}/portainer/
   Username: ${saved_portainer_user}
   Password: ${saved_portainer_password}
 
 InfluxDB
-  URL:      http://${host_ip}:8086
+  URL:      https://${host_ip}/influx/
   Username: ${saved_influx_user}
   Password: ${saved_influx_password}
   Org:      ${saved_influx_org}
 
 Grafana
-  URL:      http://${host_ip}:3000
+  URL:      https://${host_ip}/grafana/
   Username: ${saved_grafana_user}
   Password: ${saved_grafana_password}
 
@@ -254,6 +259,23 @@ EOF
 
   cat > "${PUBLIC_CONFIG_FILE}" <<EOF
 GO-EUC APPLIANCE CONFIG
+GeneratedUTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+ApplianceIP=${host_ip}
+
+ServiceEndpoints
+HTTPSBase=https://${host_ip}
+RelativeGrafana=/grafana/
+RelativeInflux=/influx/
+RelativePortainer=/portainer/
+GrafanaURL=https://${host_ip}/grafana/
+InfluxURL=https://${host_ip}/influx/
+PortainerURL=https://${host_ip}/portainer/
+GrafanaDirectURL=http://${host_ip}:3000/grafana/
+InfluxDirectURL=http://${host_ip}:8086/influx/
+PortainerDirectURL=https://${host_ip}:9443
+GrafanaPort=3000
+InfluxPort=8086
+PortainerPort=9443
 
 Appliance Login
 Username=${APPLIANCE_LOGIN_USER_RESOLVED}
@@ -278,14 +300,11 @@ Password=${saved_grafana_password}
 
 Telegraf
 PackageFolder=${TELEGRAF_PUBLIC_DIR}
-InfluxURL=http://${host_ip}:8086
+InfluxURL=https://${host_ip}/influx
 InfluxOrg=${saved_influx_org}
 InfluxToken=${saved_influx_token}
 EOF
   chmod 644 "${PUBLIC_CONFIG_FILE}"
-
-  cat /proc/sys/kernel/random/boot_id > "${DELETE_CONFIG_BOOTID_FILE}"
-  chmod 600 "${DELETE_CONFIG_BOOTID_FILE}"
 }
 
 detect_primary_interface() {
@@ -464,7 +483,7 @@ configure_upgrade_timer() {
 }
 
 configure_web_file_host() {
-  mkdir -p "${PUBLIC_DIR}"
+  mkdir -p "${PUBLIC_DIR}" "${NGINX_CONF_DIR}" "${NGINX_CERT_DIR}" "${NGINX_ACME_WEBROOT}"
 
   cat > "${TELEGRAF_REFRESH_SCRIPT}" <<'EOF'
 #!/usr/bin/env bash
@@ -575,6 +594,159 @@ echo "Extracted: ${TELEGRAF_PUBLIC_DIR}/telegraf.exe"
 EOF
   chmod 755 "${TELEGRAF_REFRESH_SCRIPT}"
 
+  cat > "${LE_RENEW_SCRIPT}" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONFIG_FILE="/etc/go-euc/config.env"
+NGINX_CERT_DIR="/opt/influx-grafana/nginx/certs"
+ACME_WEBROOT="/opt/influx-grafana/nginx/acme"
+LETSENCRYPT_DOMAIN="${APPLIANCE_LETSENCRYPT_DOMAIN:-}"
+LETSENCRYPT_EMAIL="${APPLIANCE_LETSENCRYPT_EMAIL:-}"
+
+if [[ -f "${CONFIG_FILE}" ]]; then
+  # shellcheck source=/dev/null
+  source "${CONFIG_FILE}"
+  LETSENCRYPT_DOMAIN="${APPLIANCE_LETSENCRYPT_DOMAIN:-${LETSENCRYPT_DOMAIN}}"
+  LETSENCRYPT_EMAIL="${APPLIANCE_LETSENCRYPT_EMAIL:-${LETSENCRYPT_EMAIL}}"
+fi
+
+if [[ -z "${LETSENCRYPT_DOMAIN}" || -z "${LETSENCRYPT_EMAIL}" ]]; then
+  cat <<MSG
+Let's Encrypt not configured.
+Set APPLIANCE_LETSENCRYPT_DOMAIN and APPLIANCE_LETSENCRYPT_EMAIL in /etc/go-euc/config.env.
+MSG
+  exit 1
+fi
+
+if ! command -v certbot >/dev/null 2>&1; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -y
+  apt-get install -y certbot
+fi
+
+mkdir -p "${NGINX_CERT_DIR}" "${ACME_WEBROOT}"
+
+certbot certonly \
+  --webroot -w "${ACME_WEBROOT}" \
+  --domain "${LETSENCRYPT_DOMAIN}" \
+  --email "${LETSENCRYPT_EMAIL}" \
+  --agree-tos \
+  --non-interactive \
+  --keep-until-expiring
+
+install -m 0644 "/etc/letsencrypt/live/${LETSENCRYPT_DOMAIN}/fullchain.pem" "${NGINX_CERT_DIR}/letsencrypt.crt"
+install -m 0600 "/etc/letsencrypt/live/${LETSENCRYPT_DOMAIN}/privkey.pem" "${NGINX_CERT_DIR}/letsencrypt.key"
+ln -sfn "${NGINX_CERT_DIR}/letsencrypt.crt" "${NGINX_CERT_DIR}/cert.pem"
+ln -sfn "${NGINX_CERT_DIR}/letsencrypt.key" "${NGINX_CERT_DIR}/key.pem"
+
+if docker ps --format '{{.Names}}' | grep -q '^goeuc-nginx$'; then
+  docker exec goeuc-nginx nginx -s reload >/dev/null 2>&1 || true
+fi
+
+echo "Let's Encrypt certificate is active for ${LETSENCRYPT_DOMAIN}."
+EOF
+  chmod 755 "${LE_RENEW_SCRIPT}"
+
+  cat > "${NGINX_CERT_SETUP_SCRIPT}" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+NGINX_CERT_DIR="/opt/influx-grafana/nginx/certs"
+CONFIG_FILE="/etc/go-euc/config.env"
+
+mkdir -p "${NGINX_CERT_DIR}"
+
+if [[ ! -s "${NGINX_CERT_DIR}/selfsigned.key" || ! -s "${NGINX_CERT_DIR}/selfsigned.crt" ]]; then
+  CN="$(hostname -f 2>/dev/null || hostname)"
+  openssl req -x509 -nodes -newkey rsa:4096 -days 825 \
+    -subj "/CN=${CN}" \
+    -keyout "${NGINX_CERT_DIR}/selfsigned.key" \
+    -out "${NGINX_CERT_DIR}/selfsigned.crt"
+fi
+
+ln -sfn "${NGINX_CERT_DIR}/selfsigned.crt" "${NGINX_CERT_DIR}/cert.pem"
+ln -sfn "${NGINX_CERT_DIR}/selfsigned.key" "${NGINX_CERT_DIR}/key.pem"
+
+EOF
+  chmod 755 "${NGINX_CERT_SETUP_SCRIPT}"
+
+  cat > "${NGINX_CONF_DIR}/default.conf" <<'EOF'
+server {
+  listen 80;
+  listen [::]:80;
+  server_name _;
+
+  location ^~ /.well-known/acme-challenge/ {
+    root /var/www/acme;
+    default_type "text/plain";
+  }
+
+  location / {
+    return 301 https://$host$request_uri;
+  }
+}
+
+server {
+  listen 443 ssl;
+  listen [::]:443 ssl;
+  server_name _;
+
+  ssl_certificate /etc/nginx/certs/cert.pem;
+  ssl_certificate_key /etc/nginx/certs/key.pem;
+  ssl_protocols TLSv1.2 TLSv1.3;
+  ssl_ciphers HIGH:!aNULL:!MD5;
+
+  location ^~ /.well-known/acme-challenge/ {
+    root /var/www/acme;
+    default_type "text/plain";
+  }
+
+  location /grafana/ {
+    proxy_pass http://grafana:3000/grafana/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+  }
+
+  location /influx/ {
+    proxy_pass http://influxdb:8086/influx/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-Prefix /influx;
+  }
+
+  location /portainer/ {
+    proxy_pass https://portainer:9443/portainer/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_ssl_verify off;
+  }
+
+  location /api/ {
+    proxy_pass http://host.docker.internal:18080/api/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+  }
+
+  location / {
+    root /usr/share/nginx/html;
+    index index.html;
+    try_files $uri $uri/ =404;
+  }
+}
+EOF
+
   cat > "${PUBLIC_INDEX_FILE}" <<'EOF'
 <!doctype html>
 <html lang="en">
@@ -585,29 +757,64 @@ EOF
   <style>
     body { font-family: Arial, sans-serif; margin: 2rem; line-height: 1.4; }
     button { padding: 0.6rem 1rem; font-size: 1rem; cursor: pointer; }
+    input { padding: 0.45rem 0.55rem; font-size: 1rem; min-width: 320px; max-width: 100%; }
+    label { display: inline-block; margin-top: 0.4rem; margin-bottom: 0.2rem; font-weight: 600; }
     pre { background: #f6f8fa; padding: 1rem; border: 1px solid #d0d7de; border-radius: 6px; white-space: pre-wrap; }
     .links a { display: inline-block; margin: 0.2rem 0.6rem 0.2rem 0; }
+    .card { border: 1px solid #d0d7de; border-radius: 8px; padding: 1rem; margin: 1rem 0; background: #fff; max-width: 900px; }
+    .form-row { margin-bottom: 0.5rem; }
+    .hint { color: #57606a; font-size: 0.95rem; margin-top: 0.5rem; }
   </style>
 </head>
 <body>
-  <h1>GO-EUC Appliance File Host</h1>
+  <h1>GO-EUC Appliance</h1>
   <p class="links">
+    <a href="/grafana/">Open Grafana</a>
+    <a href="/influx/">Open InfluxDB</a>
+    <a href="/portainer/">Open Portainer</a>
     <a href="/telegraf/">Browse /telegraf/</a>
     <a href="/config.txt">View config.txt</a>
   </p>
   <button id="refreshBtn" type="button">Fetch latest Telegraf Windows package</button>
   <button id="fullUpdateBtn" type="button">Run Full Appliance Update</button>
+  <button id="renewLeBtn" type="button">Renew Let's Encrypt Certificate</button>
+  <div class="card">
+    <h2>Let's Encrypt Setup</h2>
+    <form id="letsencryptForm">
+      <div class="form-row">
+        <label for="leDomain">Domain (public DNS)</label><br>
+        <input id="leDomain" name="domain" type="text" placeholder="appliance.example.com" required>
+      </div>
+      <div class="form-row">
+        <label for="leEmail">Email</label><br>
+        <input id="leEmail" name="email" type="email" placeholder="admin@example.com" required>
+      </div>
+      <button id="saveLeBtn" type="submit">Save and Request Certificate</button>
+      <div class="hint">This saves values into appliance config, then immediately requests and applies the cert.</div>
+    </form>
+  </div>
   <p id="status"></p>
   <pre id="output">Click the button to fetch/update Telegraf package and telegraf.exe.</pre>
   <script>
     const btn = document.getElementById('refreshBtn');
     const fullUpdateBtn = document.getElementById('fullUpdateBtn');
+    const renewLeBtn = document.getElementById('renewLeBtn');
+    const saveLeBtn = document.getElementById('saveLeBtn');
+    const letsencryptForm = document.getElementById('letsencryptForm');
+    const leDomain = document.getElementById('leDomain');
+    const leEmail = document.getElementById('leEmail');
     const status = document.getElementById('status');
     const output = document.getElementById('output');
+    const allButtons = [btn, fullUpdateBtn, renewLeBtn, saveLeBtn];
+
+    function setBusyState(disabled) {
+      allButtons.forEach((button) => {
+        if (button) button.disabled = disabled;
+      });
+    }
 
     btn.addEventListener('click', async () => {
-      btn.disabled = true;
-      fullUpdateBtn.disabled = true;
+      setBusyState(true);
       status.textContent = 'Refreshing package...';
       output.textContent = '';
       try {
@@ -618,14 +825,12 @@ EOF
         status.textContent = 'Refresh request failed.';
         output.textContent = String(err);
       } finally {
-        btn.disabled = false;
-        fullUpdateBtn.disabled = false;
+        setBusyState(false);
       }
     });
 
     fullUpdateBtn.addEventListener('click', async () => {
-      btn.disabled = true;
-      fullUpdateBtn.disabled = true;
+      setBusyState(true);
       status.textContent = 'Running full appliance update (this can take a while)...';
       output.textContent = '';
       try {
@@ -636,8 +841,55 @@ EOF
         status.textContent = 'Full update request failed.';
         output.textContent = String(err);
       } finally {
-        btn.disabled = false;
-        fullUpdateBtn.disabled = false;
+        setBusyState(false);
+      }
+    });
+
+    renewLeBtn.addEventListener('click', async () => {
+      setBusyState(true);
+      status.textContent = "Renewing Let's Encrypt certificate...";
+      output.textContent = '';
+      try {
+        const res = await fetch('/api/renew-letsencrypt', { method: 'POST' });
+        const payload = await res.json();
+        output.textContent = payload.output || payload.message || '';
+        status.textContent = res.ok ? 'Certificate renewal completed.' : 'Certificate renewal returned an error.';
+      } catch (err) {
+        status.textContent = 'Certificate renewal request failed.';
+        output.textContent = String(err);
+      } finally {
+        setBusyState(false);
+      }
+    });
+
+    letsencryptForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const domain = leDomain.value.trim().toLowerCase();
+      const email = leEmail.value.trim();
+      if (!domain || !email) {
+        status.textContent = 'Domain and email are required.';
+        return;
+      }
+
+      setBusyState(true);
+      status.textContent = "Saving Let's Encrypt settings and requesting certificate...";
+      output.textContent = '';
+      try {
+        const res = await fetch('/api/configure-letsencrypt', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ domain, email })
+        });
+        const payload = await res.json();
+        output.textContent = payload.output || payload.message || '';
+        status.textContent = res.ok
+          ? `Certificate applied for ${payload.domain}.`
+          : (payload.message || 'Certificate request/apply returned an error.');
+      } catch (err) {
+        status.textContent = 'Certificate setup request failed.';
+        output.textContent = String(err);
+      } finally {
+        setBusyState(false);
       }
     });
   </script>
@@ -645,6 +897,7 @@ EOF
 </html>
 EOF
   chmod 644 "${PUBLIC_INDEX_FILE}"
+  "${NGINX_CERT_SETUP_SCRIPT}" || true
 
   systemctl daemon-reload || true
   systemctl enable --now go-euc-webfiles.service || true
@@ -654,7 +907,7 @@ publish_telegraf_files() {
   local host_ip="$1"
   local influx_org="$2"
   local influx_token="$3"
-  local telegraf_url="http://${host_ip}:8086"
+  local telegraf_url="https://${host_ip}/influx"
   local conf_file=""
   local install_md_source="${TELEGRAF_SOURCE_DIR}/WINDOWS_INSTALL.md"
   local install_md_dest="${TELEGRAF_PUBLIC_DIR}/WINDOWS_INSTALL.md"
@@ -746,6 +999,7 @@ fi
 
 "${INSTALLER}" | tee "${LOG_FILE}"
 add_login_user_to_docker_group
+"${LE_RENEW_SCRIPT}" auto || true
 publish_final_summary
 
 date -u +"%Y-%m-%dT%H:%M:%SZ" > "${MARKER_FILE}"
