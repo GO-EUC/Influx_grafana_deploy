@@ -222,6 +222,9 @@ Portainer
   Username: ${saved_portainer_user}
   Password: ${saved_portainer_password}
 
+GO-EUC Web
+  URL:      https://${host_ip}/goeucweb/
+
 InfluxDB
   URL:      https://${host_ip}/influx/
   Username: ${saved_influx_user}
@@ -267,15 +270,18 @@ HTTPSBase=https://${host_ip}
 RelativeGrafana=/grafana/
 RelativeInflux=/influx/
 RelativePortainer=/portainer/
+RelativeGoeucWeb=/goeucweb/
 GrafanaURL=https://${host_ip}/grafana/
 InfluxURL=https://${host_ip}/influx/
 PortainerURL=https://${host_ip}/portainer/
+GoeucWebURL=https://${host_ip}/goeucweb/
 GrafanaDirectURL=http://${host_ip}:3000/grafana/
 InfluxDirectURL=http://${host_ip}:8086/influx/
 PortainerDirectURL=https://${host_ip}:9443
 GrafanaPort=3000
 InfluxPort=8086
 PortainerPort=9443
+GoeucWebContainerPort=80
 
 Appliance Login
 Username=${APPLIANCE_LOGIN_USER_RESOLVED}
@@ -731,6 +737,18 @@ server {
     proxy_ssl_verify off;
   }
 
+  location = /goeucweb {
+    return 301 /goeucweb/;
+  }
+
+  location /goeucweb/ {
+    proxy_pass http://goeucweb:80/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+  }
+
   location /api/ {
     proxy_pass http://host.docker.internal:18080/api/;
     proxy_set_header Host $host;
@@ -772,6 +790,7 @@ EOF
     <a href="/grafana/">Open Grafana</a>
     <a href="/influx/">Open InfluxDB</a>
     <a href="/portainer/">Open Portainer</a>
+    <a href="/goeucweb/">Open GO-EUC Web</a>
     <a href="/telegraf/">Browse /telegraf/</a>
     <a href="/config.txt">View config.txt</a>
   </p>

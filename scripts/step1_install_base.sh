@@ -452,6 +452,13 @@ services:
     depends_on:
       - influxdb
 
+  goeucweb:
+    image: goeuc/webserver:latest
+    container_name: goeucweb
+    restart: unless-stopped
+    networks:
+      - monitoring_net
+
   nginx:
     image: nginx:1.27-alpine
     container_name: goeuc-nginx
@@ -471,6 +478,7 @@ services:
     depends_on:
       - influxdb
       - grafana
+      - goeucweb
 
 networks:
   monitoring_net:
@@ -512,6 +520,7 @@ echo "- Web UI (HTTPS): https://<vm-ip>/"
 echo "- Grafana: https://<vm-ip>/grafana/"
 echo "- InfluxDB: https://<vm-ip>/influx/"
 echo "- Portainer: https://<vm-ip>/portainer/"
+echo "- GO-EUC Web: https://<vm-ip>/goeucweb/"
 echo "- Portainer direct: https://<vm-ip>:9443"
 echo "  - username: ${PORTAINER_ADMIN_USER}"
 echo "  - password: ${PORTAINER_ADMIN_PASSWORD}"

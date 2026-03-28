@@ -58,6 +58,7 @@ Optional: you can pre-seed or manually edit `/etc/go-euc/config.env` using `appl
 - Portainer: `https://<appliance-ip>/portainer/`
 - InfluxDB: `https://<appliance-ip>/influx/`
 - Grafana: `https://<appliance-ip>/grafana/`
+- GO-EUC Web: `https://<appliance-ip>/goeucweb/`
 - Legacy direct access remains available:
   - Portainer: `https://<appliance-ip>:9443`
   - InfluxDB: `http://<appliance-ip>:8086/influx/`
@@ -87,7 +88,7 @@ The default web page (`https://<appliance-ip>/`) includes a **Fetch latest Teleg
 The same page also includes **Run Full Appliance Update** (`POST /api/full-update`) which performs:
 
 - Ubuntu package update/upgrade on the VM
-- container image refresh/redeploy (`influxdb`, `grafana`, `portainer`)
+- container image refresh/redeploy (`influxdb`, `grafana`, `portainer`, `goeuc/webserver`)
 - dashboard bundle refresh from configured dashboard URL
 - Telegraf package/executable refresh in `/telegraf/`
 
