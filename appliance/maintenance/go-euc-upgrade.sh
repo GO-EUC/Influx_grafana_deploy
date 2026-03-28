@@ -10,10 +10,20 @@ if [[ ! -f "${STACK_FILE}" ]]; then
 fi
 
 echo "[upgrade] Pulling latest images for compose stack..."
-docker compose -f "${STACK_FILE}" pull
+docker compose -f "${STACK_FILE}" pull influxdb grafana nginx
+
+echo "[upgrade] Pulling GO-EUC web image (best effort)..."
+if ! docker compose -f "${STACK_FILE}" pull goeucweb; then
+  echo "[upgrade] WARN: Failed to pull goeucweb image. Continuing with core services."
+fi
 
 echo "[upgrade] Recreating stack services with latest images..."
-docker compose -f "${STACK_FILE}" up -d --remove-orphans
+docker compose -f "${STACK_FILE}" up -d --remove-orphans influxdb grafana nginx
+
+echo "[upgrade] Starting GO-EUC web service (best effort)..."
+if ! docker compose -f "${STACK_FILE}" up -d goeucweb; then
+  echo "[upgrade] WARN: Failed to start goeucweb. Core services remain updated."
+fi
 
 echo "[upgrade] Updating Portainer CE to latest image..."
 docker pull portainer/portainer-ce:latest

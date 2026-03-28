@@ -100,6 +100,7 @@ GRAFANA_STATUS="unknown"
 DASHBOARD_IMPORT_STATUS="not-configured"
 DASHBOARD_JSON_COUNT="0"
 GRAFANA_DATASOURCE_STATUS="unknown"
+GOEUCWEB_STATUS="not-started"
 
 # Poll an HTTP endpoint until an expected status code is returned.
 wait_for_http() {
@@ -478,7 +479,6 @@ services:
     depends_on:
       - influxdb
       - grafana
-      - goeucweb
 
 networks:
   monitoring_net:
@@ -487,10 +487,20 @@ networks:
 YAML
 
 # --- Start services and apply readiness checks ---
-echo "==> Starting InfluxDB + Grafana"
-docker compose -f "${STACK_DIR}/docker-compose.yml" up -d
+echo "==> Starting core stack (influxdb + grafana + nginx)"
+docker compose -f "${STACK_DIR}/docker-compose.yml" up -d influxdb grafana nginx
 # Restart Grafana once to ensure provisioning mounts are fully applied.
 docker compose -f "${STACK_DIR}/docker-compose.yml" restart grafana >/dev/null 2>&1 || true
+
+echo "==> Starting GO-EUC web container (best effort)"
+for _ in 1 2 3; do
+  if docker compose -f "${STACK_DIR}/docker-compose.yml" up -d goeucweb; then
+    GOEUCWEB_STATUS="ready"
+    break
+  fi
+  GOEUCWEB_STATUS="pull-or-start-failed"
+  sleep 5
+done
 
 echo "==> Waiting for InfluxDB and Grafana readiness"
 if wait_for_http "http://localhost:8086/influx/health" "200" 90 2 || wait_for_http "http://localhost:8086/health" "200" 90 2; then
@@ -521,6 +531,7 @@ echo "- Grafana: https://<vm-ip>/grafana/"
 echo "- InfluxDB: https://<vm-ip>/influx/"
 echo "- Portainer: https://<vm-ip>/portainer/"
 echo "- GO-EUC Web: https://<vm-ip>/goeucweb/"
+echo "  - status:   ${GOEUCWEB_STATUS}"
 echo "- Portainer direct: https://<vm-ip>:9443"
 echo "  - username: ${PORTAINER_ADMIN_USER}"
 echo "  - password: ${PORTAINER_ADMIN_PASSWORD}"
