@@ -643,8 +643,8 @@ certbot certonly \
 
 install -m 0644 "/etc/letsencrypt/live/${LETSENCRYPT_DOMAIN}/fullchain.pem" "${NGINX_CERT_DIR}/letsencrypt.crt"
 install -m 0600 "/etc/letsencrypt/live/${LETSENCRYPT_DOMAIN}/privkey.pem" "${NGINX_CERT_DIR}/letsencrypt.key"
-ln -sfn "${NGINX_CERT_DIR}/letsencrypt.crt" "${NGINX_CERT_DIR}/cert.pem"
-ln -sfn "${NGINX_CERT_DIR}/letsencrypt.key" "${NGINX_CERT_DIR}/key.pem"
+install -m 0644 "${NGINX_CERT_DIR}/letsencrypt.crt" "${NGINX_CERT_DIR}/cert.pem"
+install -m 0600 "${NGINX_CERT_DIR}/letsencrypt.key" "${NGINX_CERT_DIR}/key.pem"
 
 if docker ps --format '{{.Names}}' | grep -q '^goeuc-nginx$'; then
   docker exec goeuc-nginx nginx -s reload >/dev/null 2>&1 || true
@@ -671,8 +671,8 @@ if [[ ! -s "${NGINX_CERT_DIR}/selfsigned.key" || ! -s "${NGINX_CERT_DIR}/selfsig
     -out "${NGINX_CERT_DIR}/selfsigned.crt"
 fi
 
-ln -sfn "${NGINX_CERT_DIR}/selfsigned.crt" "${NGINX_CERT_DIR}/cert.pem"
-ln -sfn "${NGINX_CERT_DIR}/selfsigned.key" "${NGINX_CERT_DIR}/key.pem"
+install -m 0644 "${NGINX_CERT_DIR}/selfsigned.crt" "${NGINX_CERT_DIR}/cert.pem"
+install -m 0600 "${NGINX_CERT_DIR}/selfsigned.key" "${NGINX_CERT_DIR}/key.pem"
 
 EOF
   chmod 755 "${NGINX_CERT_SETUP_SCRIPT}"
