@@ -23,11 +23,13 @@ fi
 docker run -d \
   --name portainer \
   --restart=always \
+  --network monitoring_net \
   -p 8000:8000 \
   -p 9443:9443 \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v portainer_data:/data \
-  portainer/portainer-ce:latest >/dev/null
+  portainer/portainer-ce:latest \
+  --base-url /portainer >/dev/null
 
 echo "[upgrade] Pruning dangling images..."
 docker image prune -f >/dev/null 2>&1 || true
