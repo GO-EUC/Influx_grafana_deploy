@@ -1,20 +1,5 @@
 # Changelog
 
-## Unreleased (`dev`)
-
-### Fixes
-- **`/telegraf/` returned 403 Forbidden** after signing in (v2.0): nginx had no directory listing for the folder, so the landing page's *Browse /telegraf/* link and the Windows install guide led nowhere (individual files still downloaded). `/telegraf/` now shows a file listing behind the same login. Workaround on v2.0 appliances: open the files directly, e.g. `https://<ip>/telegraf/telegraf.conf`, `.../telegraf.exe`, `.../WINDOWS_INSTALL.html`.
-
-### Documentation
-- `docs/getting-started.md` corrected:
-  - **Telegraf downloads:** they come from `dl.influxdata.com`; GitHub is only used for the version lookup.
-  - **Let's Encrypt:** needs inbound port 80 from the internet and outbound access to `acme-v02.api.letsencrypt.org`.
-  - **Dashboards:** now listed by the data they need (`Tests`, and an `OBUX` bucket the appliance doesn't create).
-  - **Hyper-V:** Generation 1 because Gen 2 can't use `.vhd`.
-  - **Proxmox:** exact import commands.
-  - **Setup:** wait for the `PENDING-CONSOLE-CONFIG` screen before logging in, and realistic setup times.
-  - **Troubleshooting:** re-running the wizard to fix network settings.
-
 ## v2.0 (2026-11-25)
 
 Major release. Existing appliances move to it by deploying a new appliance and running `sudo go-euc-migrate <old-ip>` on it (see `docs/switching-appliances.md`).
@@ -31,6 +16,7 @@ Major release. Existing appliances move to it by deploying a new appliance and r
 - **Pinned container images**: Grafana `13.3`, Portainer `2.45.4`, `goeuc/webserver:2004.01`, Telegraf `1.40`; InfluxDB `2.7` and nginx `1.27-alpine` as before.
 
 ### Fixes
+- **`/telegraf/` returned 403 Forbidden** after signing in in the first v2.0 build: nginx had no directory listing for the folder, so the landing page's *Browse /telegraf/* link and the Windows install guide led nowhere (individual files still downloaded). `/telegraf/` now shows a file listing behind the same login. v2.0 was re-released with this fix.
 - **Telegraf configs** didn't parse: the `token` line was missing its closing quote, and the `TELEGRAG` placeholder was misspelled.
 - **Telegraf TLS**: configs set `insecure_skip_verify = true` while the appliance uses its self-signed certificate. Once Let's Encrypt is active, they switch to the domain with full verification (`go-euc-publish-telegraf-config.sh`).
 - **Long-running actions**: nginx no longer times out `/api/` calls after 60 s, and the API server handles requests in parallel.
@@ -75,6 +61,14 @@ Major release. Existing appliances move to it by deploying a new appliance and r
 - **End-to-end test suite** in `testing/`: unattended Nutanix AHV deployment plus on-box, HTTP, collector, wizard and maintenance checks.
 
 ### Documentation
+- `docs/getting-started.md` corrected:
+  - **Telegraf downloads:** they come from `dl.influxdata.com`; GitHub is only used for the version lookup.
+  - **Let's Encrypt:** needs inbound port 80 from the internet and outbound access to `acme-v02.api.letsencrypt.org`.
+  - **Dashboards:** now listed by the data they need (`Tests`, and an `OBUX` bucket the appliance doesn't create).
+  - **Hyper-V:** Generation 1 because Gen 2 can't use `.vhd`.
+  - **Proxmox:** exact import commands.
+  - **Setup:** wait for the `PENDING-CONSOLE-CONFIG` screen before logging in, and realistic setup times.
+  - **Troubleshooting:** re-running the wizard to fix network settings.
 - New `docs/switching-appliances.md`: switching from an old to a new appliance (what moves, checklist, steps, same-IP variant, rollback, troubleshooting).
 - New `docs/getting-started.md` for first-time users: requirements (including internet and ports), download, import per hypervisor, setup wizard, first login and the certificate warning, where each password is, next steps, troubleshooting, and moving from an older appliance.
 - New `docs/development.md` (build, CI/release, Terraform, testing), moved out of the README. The README now opens with a "Start here" section.
