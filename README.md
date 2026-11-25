@@ -17,7 +17,7 @@ This repository builds and publishes the GO-EUC virtual appliance as an OVA (VMw
 - **New to the appliance?** Follow [docs/getting-started.md](docs/getting-started.md): requirements, download, import on VMware, Hyper-V, Nutanix or Proxmox, setup, first login, next steps and troubleshooting.
 - **Download:** [Releases](https://github.com/GO-EUC/Influx_grafana_deploy/releases), with OVA (VMware) and VHD (Hyper-V, Nutanix AHV, Proxmox VE/KVM) links and checksums in each release.
 - **How it fits together:** [docs/architecture.md](docs/architecture.md): ports, request routing, data flow, and what to forward on a router.
-- **Reaching it from the internet:** [docs/external-access.md](docs/external-access.md): DNS, port forwarding (direct, through a reverse proxy such as nginx on Unraid, or on the alternative ports 8080/4443), Let's Encrypt.
+- **Reaching it from the internet:** [docs/external-access.md](docs/external-access.md): DNS, port forwarding (direct, through a reverse proxy you already run, or on the alternative ports 8080/4443), Let's Encrypt.
 - **Something not working?** Run `sudo go-euc-status` on the appliance; see [Troubleshooting](docs/getting-started.md#8-troubleshooting).
 - **Moving to a new release?** Follow [docs/switching-appliances.md](docs/switching-appliances.md): deploy the new appliance, run `sudo go-euc-migrate <old-ip>` on it, switch clients over, switch the old one off.
 - **What changed:** [CHANGELOG.md](CHANGELOG.md). **Building, releasing and testing the appliance:** [docs/development.md](docs/development.md), and [lessons.md](lessons.md) for pitfalls found along the way. Releases are created on demand from the workflow; see [Releasing](docs/development.md#releasing).
@@ -50,6 +50,7 @@ The appliance is built from Ubuntu Noble cloud image and includes:
   - `go-euc-migrate` (copy all data and hand-made dashboards from an old appliance, over the network)
   - `go-euc-change-ip` (change the static IP address after setup, e.g. to take over an old appliance's address)
   - `go-euc-set-ports` (web server on the standard ports 80/443 or the alternative 8080/4443)
+  - `go-euc-set-hostname` (public host name clients are given, with or without a Let's Encrypt certificate)
   - `go-euc-backup.sh` / `go-euc-restore.sh` (file-based backup and restore)
 - credential and status output (all root-only, mode 600):
   - `/opt/influx-grafana/credentials.env`
@@ -137,7 +138,7 @@ On Nutanix AHV, pass this as the VM's guest customization (cloud-init); on VMwar
 - Portainer direct access remains available: `https://<appliance-ip>:9443`. Portainer is the tool for managing the appliance's containers, including the collectors.
 - InfluxDB API at the root, for tools that take a host and port instead of a URL (OBUX, InfluxDB client libraries): `https://<appliance-ip>/api/v2/...` (token required).
 - The InfluxDB container isn't published on the host (nginx serves `:8086` with TLS), and Grafana (`3000`) is bound to localhost; use the HTTPS addresses above.
-- **Web ports:** the addresses above use the standard ports 80/443. With the alternative ports they become `https://<appliance-ip>:4443/...` (HTTP on 8080). Switch on the landing page (*Maintenance → Web ports*), with `sudo go-euc-set-ports standard|alternative`, or before first boot with `APPLIANCE_HTTP_PORT` / `APPLIANCE_HTTPS_PORT` in `config.env` or cloud-init. The Telegraf downloads, `config.txt` and the Proxmox Metric Server settings follow the change; Windows machines already running Telegraf need the new config. 8086, 9443 and 22 don't change. See [docs/external-access.md](docs/external-access.md#setup-3-the-appliance-on-the-alternative-ports-8080--4443).
+- **Web ports:** the addresses above use the standard ports 80/443. With the alternative ports they become `https://<appliance-ip>:4443/...` (HTTP on 8080). Switch on the landing page (*Maintenance → Web ports*), with `sudo go-euc-set-ports standard|alternative`, or before first boot with `APPLIANCE_HTTP_PORT` / `APPLIANCE_HTTPS_PORT` in `config.env` or cloud-init. The Telegraf downloads, `config.txt`, the Proxmox Metric Server settings and Grafana's links follow the change; Windows machines already running Telegraf need the new config. 8086, 9443 and 22 don't change. From the internet, forward external 8080 and 4443 to the same ports on the appliance; see [docs/external-access.md](docs/external-access.md#setup-3-the-alternative-ports-8080--4443-when-80-and-443-are-already-in-use).
 
 ## Landing page
 
@@ -146,7 +147,7 @@ On Nutanix AHV, pass this as the VM's guest customization (cloud-init); on VMwar
 - **Services**: Grafana, InfluxDB, Portainer, GO-EUC Web and `config.txt`
 - **Infrastructure collectors**: one card each for VMware vSphere, Nutanix Prism Element and Proxmox VE (see [Infrastructure collectors](#infrastructure-collectors-vsphere-nutanix-proxmox-ve))
 - **Telegraf for Windows**: downloads, the install guide, and **Fetch latest Telegraf package**
-- **Maintenance**: **Run Full Appliance Update**, and **Web ports** (standard 80/443 or alternative 8080/4443)
+- **Maintenance**: **Run Full Appliance Update**, **Public host name** (the name clients are given) and **Web ports** (standard 80/443 or alternative 8080/4443)
 - **Certificates**: Let's Encrypt setup and **Renew Let's Encrypt Certificate**
 - **Activity**: the output of every action on the page
 
@@ -292,8 +293,18 @@ When configured:
 - `certbot.timer` renews automatically; a deploy hook (`go-euc-letsencrypt-deploy-hook.sh`) copies renewed certificates into nginx, reloads it and re-publishes the Telegraf configs
 - cert renewal is also available from the web UI button
 - Grafana's own URL becomes `https://<domain>/grafana/`, so the links Grafana generates (share links, alert notifications) use the domain instead of `http://localhost/grafana/` (`go-euc-grafana-url.sh`, called by the deploy hook)
-- addresses handed out with the domain (Telegraf, Proxmox Metric Server, Grafana) use the public port 443, also when the appliance listens on 4443 behind a router that maps 443 → 4443
+- on the alternative web ports these addresses keep the port (`https://<domain>:4443/`); Let's Encrypt still validates on port 80, see [docs/external-access.md](docs/external-access.md#setup-3-the-alternative-ports-8080--4443-when-80-and-443-are-already-in-use)
 - the active nginx certificate switches from self-signed to Let's Encrypt
+
+### Public host name
+
+The address the appliance gives to clients, in the Telegraf downloads, the Proxmox Metric Server settings and the links Grafana generates (share links, alert notifications), is chosen in this order (`go-euc-public-url.sh`):
+
+1. the **public host name** you set: *Maintenance → Public host name* on the landing page, `sudo go-euc-set-hostname <name>[:<port>]` (`--clear` to remove it), or `APPLIANCE_PUBLIC_HOSTNAME` in `config.env` / cloud-init. Use it when a DNS name or a reverse proxy points at the appliance, with or without a certificate;
+2. the **Let's Encrypt domain**, once its certificate is active;
+3. the appliance's **IP address** (Grafana keeps its default `http://localhost/grafana/` in this case).
+
+The port is the appliance's web port, left out when it's 443; a host name can carry its own (`goeuc.example.com:443` for a proxy publishing an appliance that listens on 4443). Telegraf verifies TLS only when the name is covered by the appliance's own Let's Encrypt certificate. The setting only changes the addresses handed out; nginx answers on any name.
 
 Let's Encrypt validates over port 80 from the internet. DNS, port forwarding and reverse-proxy setups are covered in [docs/external-access.md](docs/external-access.md).
 

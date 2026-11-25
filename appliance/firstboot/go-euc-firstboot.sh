@@ -1220,13 +1220,24 @@ pveum acl modify / -role PVEAuditor -token 'telegraf@pve!monitoring'</pre>
         <p>Updates Ubuntu packages, refreshes the pinned container images (InfluxDB, Grafana, Portainer, GO-EUC Web, nginx and any enabled collectors), reloads the dashboard bundle, refreshes the Telegraf package and configs, and updates the local-subnet access list. This can take a while.</p>
         <button id="fullUpdateBtn" type="button">Run Full Appliance Update</button>
       </div>
+      <div class="card" id="hostnameCard">
+        <h3>Public host name <span id="hostnameBadge" class="badge">checking...</span></h3>
+        <p>The name clients use to reach this appliance, for example a DNS name or a reverse proxy in front of it. It is used in the Telegraf downloads, the Proxmox Metric Server settings and Grafana's share and alert links. Leave it empty to use the Let's Encrypt domain (once its certificate is active) or the IP address.</p>
+        <form id="hostnameForm">
+          <label for="publicHostname">Host name (optionally <code>:port</code>)</label>
+          <input id="publicHostname" name="hostname" type="text" placeholder="goeuc.example.com">
+          <button class="primary" type="submit">Save host name</button>
+          <button id="hostnameClearBtn" type="button">Clear</button>
+        </form>
+        <div class="hint">Currently given to clients: <code id="hostnameBase">...</code>. Without a port, the appliance's web port is used (<code>:4443</code> on the alternative ports); add <code>:443</code> if a reverse proxy publishes it on 443. Telegraf already installed on Windows machines must get the new config.</div>
+      </div>
       <div class="card" id="portsCard">
         <h3>Web ports <span id="portsBadge" class="badge">checking...</span></h3>
-        <p>The ports this page, Grafana, Portainer and the InfluxDB API (<code>/influx</code>) are served on. Use the alternative ports when 80/443 are taken, for example by another web server you forward to.</p>
+        <p>The ports this page, Grafana, Portainer and the InfluxDB API (<code>/influx</code>) are served on. Use the alternative ports when 80/443 are already in use, on this network or on your router's public address.</p>
         <label class="check"><input type="radio" name="portProfile" value="standard"> Standard: HTTP 80, HTTPS 443</label>
         <label class="check"><input type="radio" name="portProfile" value="alternative"> Alternative: HTTP 8080, HTTPS 4443</label>
         <button id="portsBtn" type="button">Apply ports</button>
-        <div class="hint">The web server restarts and this page moves to the new address. Telegraf configs, <code>config.txt</code> and the Proxmox Metric Server settings follow automatically; Telegraf already installed on Windows machines must get the new config. Router port forwards (external 80/443) must point at the new ports. InfluxDB's own port 8086, Portainer 9443 and SSH 22 do not change.</div>
+        <div class="hint">The web server restarts and this page moves to the new address. Telegraf configs, <code>config.txt</code> and the Proxmox Metric Server settings follow automatically; Telegraf already installed on Windows machines must get the new config. Router port forwards must use the same ports (external 8080 and 4443 to the appliance's 8080 and 4443), and the appliance's public address becomes <code>https://&lt;name&gt;:4443/</code>. InfluxDB's own port 8086, Portainer 9443 and SSH 22 do not change.</div>
       </div>
       </div>
     </section>
@@ -1381,6 +1392,37 @@ pveum acl modify / -role PVEAuditor -token 'telegraf@pve!monitoring'</pre>
       }
     }
     loadProxmoxPush();
+
+    // Public host name override (APPLIANCE_PUBLIC_HOSTNAME).
+    async function loadHostname() {
+      const badge = document.getElementById('hostnameBadge');
+      try {
+        const res = await fetch('/api/public-hostname', { cache: 'no-store' });
+        const h = await res.json();
+        document.getElementById('publicHostname').value = h.hostname || '';
+        document.getElementById('hostnameBase').textContent = (h.base_url || '?') + '/';
+        const labels = { override: 'host name set', letsencrypt: "Let's Encrypt domain", ip: 'IP address' };
+        setBadge(badge, labels[h.source] || 'unknown', h.source === 'ip' ? '' : 'ok');
+      } catch (err) {
+        setBadge(badge, 'unknown', 'err');
+      }
+    }
+    loadHostname();
+
+    async function saveHostname(value) {
+      await runAction(value ? `Setting the public host name to ${value}...` : 'Clearing the public host name...',
+        '/api/public-hostname', {
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ hostname: value })
+        }, (res, payload) => payload.message || (res.ok ? 'Public host name saved.' : 'Setting the public host name returned an error.'));
+      loadHostname();
+      loadProxmoxPush();
+    }
+    document.getElementById('hostnameForm').addEventListener('submit', (event) => {
+      event.preventDefault();
+      saveHostname(event.target.elements.hostname.value.trim());
+    });
+    document.getElementById('hostnameClearBtn').addEventListener('click', () => saveHostname(''));
 
     // Web ports (nginx): standard 80/443 or alternative 8080/4443.
     async function loadPorts() {

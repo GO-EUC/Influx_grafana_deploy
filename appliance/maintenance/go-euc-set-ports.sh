@@ -21,6 +21,7 @@ CONFIG_FILE="/etc/go-euc/config.env"
 NGINX_CONF="/opt/influx-grafana/nginx/conf.d/default.conf"
 STACK_FILE="/opt/influx-grafana/stack/docker-compose.yml"
 TELEGRAF_PUBLISH_SCRIPT="/usr/local/bin/go-euc-publish-telegraf-config.sh"
+GRAFANA_URL_SCRIPT="/usr/local/bin/go-euc-grafana-url.sh"
 RESTART=true
 
 args=()
@@ -120,6 +121,8 @@ echo "[ports] HTTP ${old_http} -> ${http}, HTTPS ${old_https} -> ${https}"
 if [[ "${RESTART}" == true && -f "${STACK_FILE}" ]]; then
   docker compose -f "${STACK_FILE}" up -d nginx >/dev/null 2>&1
   echo "[ports] nginx restarted"
+  # With a Let's Encrypt domain, Grafana's own URL carries the port too.
+  [[ -x "${GRAFANA_URL_SCRIPT}" ]] && "${GRAFANA_URL_SCRIPT}" || true
 fi
 suffix=""; [[ "${https}" != 443 ]] && suffix=":${https}"
-echo "[ports] The appliance is now at https://${ip}${suffix}/  (router: forward external 80 -> ${http}, 443 -> ${https})"
+echo "[ports] The appliance is now at https://${ip}${suffix}/  (router: forward external ${http} -> ${http} and ${https} -> ${https})"

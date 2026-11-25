@@ -14,7 +14,6 @@ import urllib.parse
 
 PUBLIC_DIR = "/opt/influx-grafana/public"
 CREDENTIALS_FILE = "/opt/influx-grafana/credentials.env"
-NGINX_CERT_DIR = "/opt/influx-grafana/nginx/certs"
 PROXMOX_PUSH_BUCKET = "Proxmox"
 CONFIG_ENV_FILE = "/etc/go-euc/config.env"
 REFRESH_CMD = ["/usr/local/bin/go-euc-refresh-telegraf.sh"]
@@ -253,31 +252,50 @@ def _read_env_file(path):
     return values
 
 
-def _letsencrypt_active():
+PUBLIC_URL_CMD = "/usr/local/bin/go-euc-public-url.sh"
+SET_HOSTNAME_CMD = "/usr/local/bin/go-euc-set-hostname.sh"
+
+
+def _public_address():
+    """KEY=value pairs from go-euc-public-url.sh (empty dict if it is unavailable)."""
     try:
-        with open(os.path.join(NGINX_CERT_DIR, "cert.pem"), "rb") as cert, \
-                open(os.path.join(NGINX_CERT_DIR, "letsencrypt.crt"), "rb") as le_cert:
-            return cert.read() == le_cert.read()
-    except OSError:
-        return False
+        out = subprocess.run([PUBLIC_URL_CMD], capture_output=True, text=True, timeout=15).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    return dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
+
+
+def _public_hostname_status():
+    config = _read_env_file(CONFIG_ENV_FILE)
+    public = _public_address()
+    return {
+        "hostname": config.get("APPLIANCE_PUBLIC_HOSTNAME", ""),
+        "letsencrypt_domain": config.get("APPLIANCE_LETSENCRYPT_DOMAIN", ""),
+        "source": public.get("PUBLIC_SOURCE", ""),
+        "base_url": public.get("PUBLIC_BASE", ""),
+        "tls_verify": public.get("PUBLIC_TLS_VERIFY") == "true",
+    }
 
 
 def _proxmox_metric_server(request_host):
     """Settings for Proxmox VE's built-in Metric Server (InfluxDB, HTTPS) pushing to this appliance."""
     credentials = _read_env_file(CREDENTIALS_FILE)
     config = _read_env_file(CONFIG_ENV_FILE)
-    le_active = _letsencrypt_active() and bool(config.get("APPLIANCE_LETSENCRYPT_DOMAIN"))
-    server = config.get("APPLIANCE_LETSENCRYPT_DOMAIN") if le_active else (request_host or "").split(":")[0]
+    public = _public_address()
+    if public.get("PUBLIC_SOURCE", "ip") == "ip":
+        # Use the address the browser used to reach this page (same network as Proxmox).
+        server = (request_host or "").split(":")[0]
+    else:
+        server = public.get("PUBLIC_HOST", "")
     return {
         "server": server,
-        # The Let's Encrypt domain is a public name on the public port 443 (router maps 443 -> 4443).
-        "port": 443 if le_active else int(config.get("APPLIANCE_HTTPS_PORT") or 443),
+        "port": int(public.get("PUBLIC_PORT") or config.get("APPLIANCE_HTTPS_PORT") or 443),
         "protocol": "https",
         "api_path_prefix": "/influx",
         "organization": credentials.get("SAVED_INFLUX_ADMIN_ORG", ""),
         "bucket": PROXMOX_PUSH_BUCKET,
         "token": credentials.get("SAVED_PROXMOX_WRITE_TOKEN", ""),
-        "verify_certificate": le_active,
+        "verify_certificate": public.get("PUBLIC_TLS_VERIFY") == "true",
     }
 
 
@@ -338,6 +356,9 @@ class GoEucHandler(http.server.SimpleHTTPRequestHandler):
         if urllib.parse.urlsplit(self.path).path == "/api/ports":
             self._send_json(200, _web_ports())
             return
+        if urllib.parse.urlsplit(self.path).path == "/api/public-hostname":
+            self._send_json(200, _public_hostname_status())
+            return
         if urllib.parse.urlsplit(self.path).path == "/api/proxmox-metric-server":
             self._send_json(200, _proxmox_metric_server(self.headers.get("Host", "")))
             return
@@ -345,6 +366,29 @@ class GoEucHandler(http.server.SimpleHTTPRequestHandler):
             self.send_error(404, "Unknown API endpoint")
             return
         super().do_GET()
+
+    def _handle_set_hostname(self, raw_body):
+        try:
+            payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+        except Exception:
+            self._send_json(400, {"ok": False, "message": "Invalid JSON payload."})
+            return
+        value = str(payload.get("hostname", "")).strip().lower()
+        if value:
+            name, _, port = value.partition(":")
+            if not _is_valid_domain(name) or (port and not (port.isdigit() and 1 <= int(port) <= 65535)):
+                self._send_json(400, {"ok": False, "message": "Enter a host name such as goeuc.example.com, "
+                                                              "optionally with a port (goeuc.example.com:443)."})
+                return
+        result = subprocess.run([SET_HOSTNAME_CMD, value or "--clear"], capture_output=True, text=True, timeout=300)
+        status = _public_hostname_status()
+        if result.returncode != 0:
+            self._send_json(500, {"ok": False, "message": "Could not set the public host name.",
+                                  "output": (result.stdout + result.stderr)[-2000:], **status})
+            return
+        message = (f"Clients are now given {status['base_url']}/." if value
+                   else f"Public host name cleared: clients are given {status['base_url']}/.")
+        self._send_json(200, {"ok": True, "message": message, "output": result.stdout[-2000:], **status})
 
     def _handle_set_ports(self, raw_body):
         try:
@@ -431,6 +475,9 @@ class GoEucHandler(http.server.SimpleHTTPRequestHandler):
 
         if self.path == "/api/ports":
             self._handle_set_ports(raw_body)
+            return
+        if self.path == "/api/public-hostname":
+            self._handle_set_hostname(raw_body)
             return
 
         route = _match_collector_route(self.path)

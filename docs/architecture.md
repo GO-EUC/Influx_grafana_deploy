@@ -145,25 +145,26 @@ flowchart LR
 
     router -- "1. default<br/>80 -> appliance:80<br/>443 -> appliance:443" --> a1["Appliance<br/>standard ports 80 / 443"]
 
-    router -- "2. 80, 443" --> proxy["Reverse proxy<br/>(e.g. nginx on Unraid,<br/>any subnet)"]
+    router -- "2. 80, 443" --> proxy["Reverse proxy<br/>(any subnet)"]
     proxy -- "by host name:<br/>goeuc.example.com<br/>-> https://appliance:443" --> a2["Appliance<br/>standard ports 80 / 443"]
     proxy -- "other host names" --> other["Other services"]
 
-    router -- "3. 80 -> appliance:8080<br/>443 -> appliance:4443" --> a3["Appliance<br/>alternative ports 8080 / 4443"]
+    router -- "3. 8080 -> appliance:8080<br/>4443 -> appliance:4443<br/>(80 / 443 stay with other services)" --> a3["Appliance<br/>alternative ports 8080 / 4443"]
 ```
 
 | Setup | Router | Appliance web ports | Certificate |
 |---|---|---|---|
 | 1. Direct (default) | 80 → appliance:80, 443 → appliance:443 | standard 80/443 | Let's Encrypt on the appliance |
 | 2. Reverse proxy (one public IP shared with other services) | 80, 443 → proxy; proxy sends `goeuc.example.com` to `https://appliance:443` | standard 80/443 (or 4443) | on the proxy; the appliance keeps its self-signed certificate |
-| 3. Alternative ports | 80 → appliance:8080, 443 → appliance:4443 | alternative 8080/4443 | Let's Encrypt on the appliance |
+| 3. Alternative ports (80/443 already in use) | 8080 → appliance:8080, 4443 → appliance:4443; public address `https://goeuc.example.com:4443/` | alternative 8080/4443 | self-signed, or Let's Encrypt only if whatever owns port 80 passes `/.well-known/acme-challenge/` to appliance:8080 |
 
 Never forward 22, 9443 or 8086; use a VPN for remote administration.
 
 Things to know before forwarding:
 - The landing page, `/telegraf/` and `/api/` stay behind the appliance login. Grafana and Portainer use their own logins, and the InfluxDB API (`/influx`, `/api/v2`) needs a token.
 - `/config.txt` stays local-subnet only. Forwarded requests keep the client's real source address and get 403. Requests through a reverse proxy come from the proxy's address and get 403 unless the proxy is on the appliance's subnet. Traffic over IPv6 is relayed by Docker's proxy and is always refused for `config.txt`.
-- Use Let's Encrypt (Certificates on the landing page) once port 80 and DNS are in place. External clients then verify TLS normally. The certificate's deploy hook switches every address the appliance hands out to `https://<domain>/`, always on the public port 443: the Telegraf configs (`go-euc-publish-telegraf-config.sh`), the Proxmox Metric Server settings, and Grafana's own URL (`go-euc-grafana-url.sh`) for share and alert links.
+- Use Let's Encrypt (Certificates on the landing page) once port 80 and DNS are in place. External clients then verify TLS normally. The certificate's deploy hook switches every address the appliance hands out to `https://<domain>/` (`https://<domain>:4443/` on the alternative ports): the Telegraf configs (`go-euc-publish-telegraf-config.sh`), the Proxmox Metric Server settings, and Grafana's own URL (`go-euc-grafana-url.sh`) for share and alert links.
+- Behind a reverse proxy, or with a DNS name but no certificate on the appliance, set a **public host name** (*Maintenance → Public host name*, `go-euc-set-hostname`): it takes priority over the Let's Encrypt domain for every address handed out (`go-euc-public-url.sh`).
 
 ## Outbound connections from the appliance
 
@@ -187,4 +188,4 @@ Things to know before forwarding:
 | `/opt/influx-grafana/run/api.sock` | API backend socket (shared with nginx) |
 | `/opt/influx-grafana/collectors/` | Rendered collector configs (no secrets) |
 | `/opt/influx-grafana/credentials.env`, `install-summary.txt` | Credentials (root-only) |
-| `/etc/go-euc/` | `config.env` (wizard answers, web ports), collector settings, break-glass account, dashboard URL |
+| `/etc/go-euc/` | `config.env` (wizard answers, web ports, public host name), collector settings, break-glass account, dashboard URL |

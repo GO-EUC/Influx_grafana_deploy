@@ -2,14 +2,12 @@
 
 ## Unreleased
 
-### Changed
-- With a Let's Encrypt domain, the Telegraf configs and the Proxmox Metric Server settings use `https://<domain>/` on the public port 443, also when the appliance listens on 4443 (the router maps 443 → 4443).
-
 ### Added
 - **Web ports:** the web server (nginx) can use the standard ports 80/443 or the alternative 8080/4443. Switch on the landing page (*Maintenance → Web ports*), with `sudo go-euc-set-ports standard|alternative`, or before first boot with `APPLIANCE_HTTP_PORT` / `APPLIANCE_HTTPS_PORT`. The Telegraf configs, `config.txt` (new `HTTPPort` / `HTTPSPort` entries), the install summary and the Proxmox Metric Server settings follow the change, and `go-euc-status`, `go-euc-change-ip` and `go-euc-migrate` (`<old-ip>:<port>`) know about it.
 - **InfluxDB API at the root** of the web port (`https://<appliance>/api/v2/...`, token required), for tools that take a host and port instead of a URL, such as OBUX and the InfluxDB client libraries.
-- **Grafana links use the Let's Encrypt domain.** Once a certificate is active, Grafana's own URL becomes `https://<domain>/grafana/`, so share links and alert notifications no longer point at `http://localhost/grafana/` (`go-euc-grafana-url.sh`, run by the certificate's deploy hook and kept by the installer).
-- **[External access guide](docs/external-access.md):** DNS, port forwarding straight to the appliance, through a reverse proxy (for example nginx on Unraid, one public IP), or on the alternative ports; what's exposed; Let's Encrypt troubleshooting. The architecture page shows the three setups.
+- **Public host name** (*Maintenance → Public host name*, `sudo go-euc-set-hostname <name>[:<port>]`, or `APPLIANCE_PUBLIC_HOSTNAME`): the name clients are given in the Telegraf downloads, the Proxmox Metric Server settings and Grafana's links, with or without a Let's Encrypt certificate, e.g. behind a reverse proxy.
+- **Grafana links use the Let's Encrypt domain.** Once a certificate is active, Grafana's own URL becomes `https://<domain>/grafana/` (with `:4443` on the alternative ports), so share links and alert notifications no longer point at `http://localhost/grafana/` (`go-euc-grafana-url.sh`, run by the certificate's deploy hook and kept by the installer).
+- **[External access guide](docs/external-access.md):** DNS, port forwarding straight to the appliance, through a reverse proxy (one public IP shared with other services), or on the alternative ports; what's exposed; Let's Encrypt troubleshooting. The architecture page shows the three setups.
 
 ## v2.0 (2026-11-25)
 
