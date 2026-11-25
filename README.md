@@ -291,6 +291,8 @@ When configured:
 - first-boot attempts automatic certificate issuance
 - `certbot.timer` renews automatically; a deploy hook (`go-euc-letsencrypt-deploy-hook.sh`) copies renewed certificates into nginx, reloads it and re-publishes the Telegraf configs
 - cert renewal is also available from the web UI button
+- Grafana's own URL becomes `https://<domain>/grafana/`, so the links Grafana generates (share links, alert notifications) use the domain instead of `http://localhost/grafana/` (`go-euc-grafana-url.sh`, called by the deploy hook)
+- addresses handed out with the domain (Telegraf, Proxmox Metric Server, Grafana) use the public port 443, also when the appliance listens on 4443 behind a router that maps 443 → 4443
 - the active nginx certificate switches from self-signed to Let's Encrypt
 
 Let's Encrypt validates over port 80 from the internet. DNS, port forwarding and reverse-proxy setups are covered in [docs/external-access.md](docs/external-access.md).

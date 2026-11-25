@@ -163,7 +163,7 @@ Never forward 22, 9443 or 8086; use a VPN for remote administration.
 Things to know before forwarding:
 - The landing page, `/telegraf/` and `/api/` stay behind the appliance login. Grafana and Portainer use their own logins, and the InfluxDB API (`/influx`, `/api/v2`) needs a token.
 - `/config.txt` stays local-subnet only. Forwarded requests keep the client's real source address and get 403. Requests through a reverse proxy come from the proxy's address and get 403 unless the proxy is on the appliance's subnet. Traffic over IPv6 is relayed by Docker's proxy and is always refused for `config.txt`.
-- Use Let's Encrypt (Certificates on the landing page) once port 80 and DNS are in place. External clients then verify TLS normally, and `go-euc-publish-telegraf-config.sh` switches the Telegraf configs to the DNS name (with `:4443` on the alternative ports).
+- Use Let's Encrypt (Certificates on the landing page) once port 80 and DNS are in place. External clients then verify TLS normally. The certificate's deploy hook switches every address the appliance hands out to `https://<domain>/`, always on the public port 443: the Telegraf configs (`go-euc-publish-telegraf-config.sh`), the Proxmox Metric Server settings, and Grafana's own URL (`go-euc-grafana-url.sh`) for share and alert links.
 
 ## Outbound connections from the appliance
 

@@ -23,6 +23,7 @@ It was written to verify the security hardening, the infrastructure collectors (
 | `checks/backup_restore_checks.sh` | client | Restores a `go-euc-backup.sh` archive from another appliance (`--with-grafana`). Checks every point arrived in the target's own org, collectors restored, Grafana login and data source after the DB restore, and that a second restore is harmless. |
 | `checks/maintenance_checks.sh` | client | Fetch latest Telegraf, **Run Full Appliance Update**, reboot, and every on-box check again. |
 | `checks/public_checks.sh` | client | Through the appliance's public host name (router forward or reverse proxy): certificate, logins, every service, `config.txt` and `:8086` not reachable, 20 MB upload not refused, WebSocket upgrade, and a write through the name that lands in this appliance's InfluxDB. Needs NAT loopback, or run it from outside. |
+| `checks/letsencrypt_urls_checks.sh` | appliance (root) | Simulates an active Let's Encrypt certificate (the appliance's own certificate in a fake certbot lineage, a test domain, the real deploy hook). Checks Grafana's URL, the Telegraf configs and the Proxmox Metric Server settings switch to the domain on port 443, also with the alternative ports, then restores everything. |
 | `checks/ports_checks.sh` | client | Switches the web ports to the alternative 8080/4443 through the landing page API, checks every route, the redirect, the old port closed, Telegraf configs, `config.txt`, `config.env`, Compose and `go-euc-status`; switches back to 80/443 with `go-euc-set-ports` and checks again. |
 
 Every check prints `PASS`, `FAIL` or `INFO`, and nothing prints passwords or tokens. Secrets are read from files and handed to `curl` through temporary config files, so they never appear on the command line.
@@ -70,6 +71,7 @@ testing/nutanix/wait_for_provisioning.sh "$IP"
 # 3. Checks
 $SSH "sudo EXPECTED_IP=$IP EXPECTED_HOST=$VM bash -s" < testing/checks/remote_checks.sh
 $SSH 'sudo bash -s' < testing/checks/wizard_check.sh
+$SSH 'sudo bash -s' < testing/checks/letsencrypt_urls_checks.sh
 testing/checks/http_checks.sh "$IP" 403     # 403: client NOT on the appliance subnet; use 200 if it is
 testing/checks/collector_checks.sh "$IP"
 testing/checks/ports_checks.sh "$IP"          # standard -> alternative (8080/4443) -> standard
@@ -204,5 +206,5 @@ Web ports option, `/api/v2` route, and access through a public host name. Fresh 
 Found during development, before this build: `go-euc-set-ports` didn't update `HTTPPort`, `HTTPSPort` and the Proxmox Metric Server `Port` inside `config.txt` (found with a hot-patched run-4 appliance; fixed).
 
 Open items:
-- Grafana's own URL is `http://localhost/grafana/` (`GF_SERVER_ROOT_URL` with the default domain). Navigation uses relative paths and works everywhere, but links Grafana generates (*Share → Copy link*, alert notifications) show `localhost`.
+- Grafana's own URL is `http://localhost/grafana/` (`GF_SERVER_ROOT_URL` with the default domain). Navigation uses relative paths and works everywhere, but links Grafana generates (*Share → Copy link*, alert notifications) show `localhost`. **Fixed afterwards** for appliances with an active Let's Encrypt certificate (`go-euc-grafana-url.sh`): `letsencrypt_urls_checks.sh` passed 15/15 on this appliance with the scripts hot-patched, and on-box 90/90, HTTP 58/58 and public 24/24 again afterwards. Behind a reverse proxy that holds the certificate, the links still show `localhost`.
 - The landing page's InfluxDB tile links to `:8086`, which isn't reachable through a public name or reverse proxy. Expected and documented; the InfluxDB API works through `/influx` and `/api/v2`.

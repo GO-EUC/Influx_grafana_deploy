@@ -9,6 +9,7 @@ set -euo pipefail
 
 NGINX_CERT_DIR="/opt/influx-grafana/nginx/certs"
 TELEGRAF_PUBLISH_SCRIPT="/usr/local/bin/go-euc-publish-telegraf-config.sh"
+GRAFANA_URL_SCRIPT="/usr/local/bin/go-euc-grafana-url.sh"
 lineage="${RENEWED_LINEAGE:-}"
 
 if [[ -z "${lineage}" || ! -s "${lineage}/fullchain.pem" || ! -s "${lineage}/privkey.pem" ]]; then
@@ -29,6 +30,11 @@ fi
 # Telegraf clients can now verify TLS against the certificate's domain name.
 if [[ -x "${TELEGRAF_PUBLISH_SCRIPT}" ]]; then
   "${TELEGRAF_PUBLISH_SCRIPT}" || true
+fi
+
+# Grafana's share and alert links use the certificate's domain.
+if [[ -x "${GRAFANA_URL_SCRIPT}" ]]; then
+  "${GRAFANA_URL_SCRIPT}" || true
 fi
 
 echo "[le-deploy-hook] Installed certificate from ${lineage} and reloaded nginx."

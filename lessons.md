@@ -45,4 +45,5 @@ Things that cost time while building and testing the appliance, and how to avoid
 ## Ports and addresses
 
 - **Keep the address in one place.** The web ports live in `/etc/go-euc/config.env` (`APPLIANCE_HTTP_PORT`, `APPLIANCE_HTTPS_PORT`). Everything that prints or embeds the appliance URL builds it from there, dropping `:443`. That covers first boot, the Telegraf configs, `config.txt`, `go-euc-status`, `go-euc-change-ip` and `go-euc-migrate`. When you add something that shows the address, add it to `go-euc-set-ports` as well.
+- **A domain means the public port.** Once Let's Encrypt is active, addresses use `https://<domain>/` without the appliance's own port: the router publishes the domain on 443, even when it forwards to 4443 inside.
 - **When rewriting an address, match whole values.** `192.168.1.13` must not match inside `192.168.1.130`, and a port rewrite of `https://<ip>` must leave `:8086` and `:9443` alone.

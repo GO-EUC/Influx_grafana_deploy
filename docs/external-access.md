@@ -42,7 +42,10 @@ flowchart LR
 1. **DNS:** create an A record, for example `goeuc.example.com`, pointing at your public IP.
 2. **Router:** forward TCP **80** and TCP **443** to the appliance's IP address, on the same ports.
 3. **Check:** from outside your network (for example a phone on mobile data), `http://goeuc.example.com/` should redirect to `https://goeuc.example.com/` and show a certificate warning. The warning is expected until the next step.
-4. **Certificate:** on the landing page, go to **Certificates → Let's Encrypt setup** and enter the domain and your email. The appliance requests the certificate and installs it, and renewals are automatic. The Telegraf configs under `/telegraf/` switch to `https://goeuc.example.com/influx` with full TLS verification.
+4. **Certificate:** on the landing page, go to **Certificates → Let's Encrypt setup** and enter the domain and your email. The appliance requests the certificate and installs it, and renewals are automatic. Everything the appliance hands out switches to the domain:
+   - the Telegraf configs under `/telegraf/` use `https://goeuc.example.com/influx` with full TLS verification;
+   - the Proxmox Metric Server settings use the domain;
+   - links Grafana generates (*Share → Copy link*, alert notifications) start with `https://goeuc.example.com/grafana/` instead of `http://localhost/grafana/`.
 5. **Test:** `https://goeuc.example.com/grafana/` opens Grafana without a certificate warning.
 
 On your own network, keep using `https://<appliance-ip>/` or the DNS name. If the router doesn't support "NAT loopback" (hairpinning), the DNS name may not work from inside the lab. That's harmless; use the IP inside.
@@ -82,6 +85,8 @@ With a proxy in front, **the proxy holds the public certificate**: it answers Le
 3. **Don't** use *Certificates → Let's Encrypt setup* on the appliance in this setup. The proxy answers Let's Encrypt's checks for the host name itself, so the appliance's request would fail.
 
 Inside the lab, keep using `https://<appliance-ip>/`. The Telegraf downloads point at the appliance's IP, which suits machines in the lab. A machine outside the lab uses `url = "https://goeuc.example.com/influx"` in its Telegraf config, and can set `insecure_skip_verify = false` because the proxy's certificate is trusted.
+
+Because the appliance has no certificate of its own here, links Grafana generates (*Share → Copy link*, alert notifications) still start with `http://localhost/grafana/`. Replace that part with `https://goeuc.example.com/grafana/` when you share one.
 
 Through the proxy, the InfluxDB web UI isn't available, because it lives on port 8086. The landing page's InfluxDB tile only works from inside the lab. The InfluxDB API works through the proxy at `/influx` and `/api/v2`.
 
@@ -134,7 +139,7 @@ Everything that contains the appliance's address follows automatically: the Tele
 | TCP 80 | appliance:**8080** |
 | TCP 443 | appliance:**4443** |
 
-Let's Encrypt still works: it validates on external port 80, which the router sends to 8080. On your own network the appliance is at `https://<appliance-ip>:4443/`.
+Let's Encrypt still works: it validates on external port 80, which the router sends to 8080. On your own network the appliance is at `https://<appliance-ip>:4443/`. Once the certificate is active, the appliance's links use the domain on the normal port, `https://goeuc.example.com/`, because that's the address the router publishes.
 
 ```mermaid
 flowchart LR

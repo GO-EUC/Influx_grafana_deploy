@@ -270,7 +270,8 @@ def _proxmox_metric_server(request_host):
     server = config.get("APPLIANCE_LETSENCRYPT_DOMAIN") if le_active else (request_host or "").split(":")[0]
     return {
         "server": server,
-        "port": int(config.get("APPLIANCE_HTTPS_PORT") or 443),
+        # The Let's Encrypt domain is a public name on the public port 443 (router maps 443 -> 4443).
+        "port": 443 if le_active else int(config.get("APPLIANCE_HTTPS_PORT") or 443),
         "protocol": "https",
         "api_path_prefix": "/influx",
         "organization": credentials.get("SAVED_INFLUX_ADMIN_ORG", ""),

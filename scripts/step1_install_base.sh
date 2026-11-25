@@ -98,6 +98,12 @@ GRAFANA_DATASOURCE_UID="DS_GO"
 config_port() { sed -n "s/^$1=//p" /etc/go-euc/config.env 2>/dev/null | tail -1; }
 NGINX_HTTP_PORT="${APPLIANCE_HTTP_PORT:-$(config_port APPLIANCE_HTTP_PORT)}"; NGINX_HTTP_PORT="${NGINX_HTTP_PORT:-80}"
 NGINX_HTTPS_PORT="${APPLIANCE_HTTPS_PORT:-$(config_port APPLIANCE_HTTPS_PORT)}"; NGINX_HTTPS_PORT="${NGINX_HTTPS_PORT:-443}"
+# Grafana's own URL for the links it generates: the Let's Encrypt domain once a certificate is
+# active (go-euc-grafana-url.sh), otherwise Grafana's default.
+GRAFANA_ROOT_URL='%(protocol)s://%(domain)s/grafana/'
+if [[ -x /usr/local/bin/go-euc-grafana-url.sh ]]; then
+  GRAFANA_ROOT_URL="$(/usr/local/bin/go-euc-grafana-url.sh --print 2>/dev/null || echo "${GRAFANA_ROOT_URL}")"
+fi
 
 # Persist resolved values for idempotent reruns and easier troubleshooting.
 # Values are shell-quoted with %q so any characters survive being sourced.
@@ -608,7 +614,7 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER}"
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD}"
-      GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s/grafana/"
+      GF_SERVER_ROOT_URL: "${GRAFANA_ROOT_URL}"
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
     networks:
       - monitoring_net
