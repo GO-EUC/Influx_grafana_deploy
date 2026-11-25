@@ -2,12 +2,21 @@
 
 set -u
 
+CONSOLE_CONFIG_MARKER="/var/lib/go-euc/console-config.done"
+
 log() {
   echo "[ensure-ssh] $*"
 }
 
 ensure_sshd_config() {
   if [[ ! -f /etc/ssh/sshd_config ]]; then
+    return
+  fi
+
+  # Until the console wizard has replaced the default goeucadmin password,
+  # leave the image's SSH password settings alone.
+  if [[ ! -f "${CONSOLE_CONFIG_MARKER}" ]]; then
+    log "Console setup pending; not enabling SSH password authentication yet."
     return
   fi
 

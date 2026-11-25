@@ -35,6 +35,8 @@ jobs:
           VIRT_CUSTOMIZE_DEBUG: "true"
           VIRT_CUSTOMIZE_NO_NETWORK: "true"
           USE_SUDO_FOR_VIRT_CUSTOMIZE: "true"
+          # Bake the dashboard bundle location (published below on main) into the image.
+          DASHBOARDS_ZIP_URL: ${{ vars.AZURE_STORAGE_ACCOUNT && format('https://{0}.blob.core.windows.net/files/Dashboards.zip', vars.AZURE_STORAGE_ACCOUNT) || '' }}
         run: bash appliance/build-appliance.sh
 
       - name: Capture artifact paths
@@ -95,6 +97,19 @@ jobs:
             --container-name "${{ vars.AZURE_STORAGE_CONTAINER }}" \
             --name "${{ steps.files.outputs.vhd_checksum_name }}" \
             --file "${{ steps.files.outputs.vhd_checksum_file }}" \
+            --auth-mode login \
+            --overwrite true
+
+      - name: Publish dashboard bundle to Azure Blob
+        if: github.ref_name == 'main'
+        run: |
+          # Appliances fetch this file during "Run Full Appliance Update", so it must
+          # match the Dashboards.zip in the released commit.
+          az storage blob upload \
+            --account-name "${{ vars.AZURE_STORAGE_ACCOUNT }}" \
+            --container-name "files" \
+            --name "Dashboards.zip" \
+            --file "Dashboards.zip" \
             --auth-mode login \
             --overwrite true
 

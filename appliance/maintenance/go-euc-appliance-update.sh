@@ -7,9 +7,12 @@ LOCK_FILE="/var/lock/go-euc-appliance-update.lock"
 INSTALL_ROOT="/opt/influx-grafana"
 STACK_DIR="${INSTALL_ROOT}/stack"
 DASHBOARDS_DIR="${STACK_DIR}/grafana/dashboards"
-DASHBOARDS_URL_DEFAULT="https://goeucartifacts4hiu9i.blob.core.windows.net/files/Dashboards.zip"
+# Fallback when no dashboard URL was baked in at build time: the bundled copy.
+DASHBOARDS_URL_DEFAULT="file:///opt/go-euc-installer/Dashboards.zip"
 REFRESH_TELEGRAF_SCRIPT="/usr/local/bin/go-euc-refresh-telegraf.sh"
 CONTAINER_UPGRADE_SCRIPT="/usr/local/bin/go-euc-upgrade.sh"
+TELEGRAF_PUBLISH_SCRIPT="/usr/local/bin/go-euc-publish-telegraf-config.sh"
+LOCAL_ACCESS_SCRIPT="/usr/local/bin/go-euc-local-access.sh"
 DASHBOARD_URL_CONFIG_FILE="/etc/go-euc/dashboard-url"
 STACK_FILE="${STACK_DIR}/docker-compose.yml"
 INSTALLER_SCRIPT="/opt/go-euc-installer/scripts/step1_install_base.sh"
@@ -34,10 +37,10 @@ ensure_reverse_proxy_stack() {
   if [[ ! -f "${STACK_FILE}" ]]; then
     missing="true"
   else
-    if ! grep -Eq '^[[:space:]]nginx:[[:space:]]*$' "${STACK_FILE}"; then
+    if ! grep -Eq '^[[:space:]]+nginx:[[:space:]]*$' "${STACK_FILE}"; then
       missing="true"
     fi
-    if ! grep -Eq '^[[:space:]]goeucweb:[[:space:]]*$' "${STACK_FILE}"; then
+    if ! grep -Eq '^[[:space:]]+goeucweb:[[:space:]]*$' "${STACK_FILE}"; then
       missing="true"
     fi
   fi
@@ -83,7 +86,7 @@ tmp_zip="$(mktemp /tmp/go-euc-dashboards-XXXXXX.zip)"
 curl -fsSL "${dashboard_url}" -o "${tmp_zip}"
 mkdir -p "${DASHBOARDS_DIR}"
 rm -rf "${DASHBOARDS_DIR}/"*
-unzip -oq "${tmp_zip}" -d "${DASHBOARDS_DIR}"
+unzip -oq "${tmp_zip}" -d "${DASHBOARDS_DIR}" -x '__MACOSX/*' '._*' '*/._*'
 rm -f "${tmp_zip}"
 
 echo "[full-update] Normalizing datasource placeholders in dashboard JSON files..."
@@ -105,6 +108,16 @@ fi
 
 echo "[full-update] Refreshing latest Telegraf package..."
 "${REFRESH_TELEGRAF_SCRIPT}"
+
+if [[ -x "${TELEGRAF_PUBLISH_SCRIPT}" ]]; then
+  echo "[full-update] Re-publishing Telegraf configs..."
+  "${TELEGRAF_PUBLISH_SCRIPT}" || echo "[full-update] WARN: Telegraf config publish failed."
+fi
+
+if [[ -x "${LOCAL_ACCESS_SCRIPT}" ]]; then
+  echo "[full-update] Refreshing local-subnet access list for /config.txt..."
+  "${LOCAL_ACCESS_SCRIPT}" || echo "[full-update] WARN: local access list refresh failed."
+fi
 
 echo "[full-update] Completed: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 echo "[full-update] ==================================================="

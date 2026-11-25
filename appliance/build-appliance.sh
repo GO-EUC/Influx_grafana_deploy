@@ -17,7 +17,11 @@ BUILD_TS="$(date -u +%Y%m%d-%H%M%S)"
 DISK_SIZE_GB="${DISK_SIZE_GB:-100}"
 VHD_SUBFORMAT="${VHD_SUBFORMAT:-dynamic}"
 BREAK_GLASS_USER="${BREAK_GLASS_USER:-recovery}"
-BREAK_GLASS_PASSWORD="${BREAK_GLASS_PASSWORD:-Recover-ChangeMe-Now!}"
+# Build-time break-glass password: random per build unless supplied. First boot rotates it
+# again per VM, so VMs deployed from the same image never share a recovery password.
+BREAK_GLASS_PASSWORD="${BREAK_GLASS_PASSWORD:-$(python3 -c 'import secrets, string; a = string.ascii_letters + string.digits; print("".join(secrets.choice(a) for _ in range(20)))')}"
+# Dashboard bundle used by the appliance's "Full Update" (CI points this at the Azure files container).
+DASHBOARDS_ZIP_URL="${DASHBOARDS_ZIP_URL:-https://goeucartifacts4hiu9i.blob.core.windows.net/files/Dashboards.zip}"
 BUILD_ID="${BUILD_TS}-${GIT_SHA:0:8}"
 APPLIANCE_BASENAME="go-euc-appliance-${BUILD_ID}"
 QCOW2_PATH="${WORK_DIR}/${APPLIANCE_BASENAME}.qcow2"
@@ -61,14 +65,16 @@ elif command -v sudo >/dev/null 2>&1 && [[ "${USE_SUDO_FOR_VIRT_CUSTOMIZE:-false
 fi
 
 ${VIRT_CUSTOMIZE_CMD} "${VIRT_CUSTOMIZE_ARGS[@]}" -a "${QCOW2_PATH}" \
-  --run-command "mkdir -p /opt/go-euc-installer/scripts /etc/go-euc /usr/local/bin /var/lib/go-euc /etc/systemd/system /etc/profile.d" \
+  --run-command "mkdir -p /opt/go-euc-installer/scripts /opt/go-euc-installer/collectors /etc/go-euc /usr/local/bin /var/lib/go-euc /etc/systemd/system /etc/profile.d" \
   --run-command "id -u ${BREAK_GLASS_USER} >/dev/null 2>&1 || useradd -m -s /bin/bash ${BREAK_GLASS_USER}" \
   --run-command "echo '${BREAK_GLASS_USER}:${BREAK_GLASS_PASSWORD}' | chpasswd" \
+  --run-command "echo '${DASHBOARDS_ZIP_URL}' > /etc/go-euc/dashboard-url && chmod 644 /etc/go-euc/dashboard-url" \
   --run-command "usermod -aG sudo ${BREAK_GLASS_USER}" \
   --run-command "chage -d -1 ${BREAK_GLASS_USER}" \
   --run-command "cat >/etc/go-euc/break-glass.env <<'EOF'
 BREAK_GLASS_USER=${BREAK_GLASS_USER}
 BREAK_GLASS_PASSWORD=${BREAK_GLASS_PASSWORD}
+BREAK_GLASS_ROTATED=false
 EOF" \
   --run-command "chmod 600 /etc/go-euc/break-glass.env" \
   --run-command "cat >/etc/issue <<'EOF'
@@ -103,7 +109,13 @@ EOF" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-ensure-ssh.service:/etc/systemd/system" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-postsetup-cleanup.sh:/usr/local/bin" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-postsetup-cleanup.service:/etc/systemd/system" \
-  --run-command "chmod +x /usr/local/bin/go-euc-firstboot.sh /usr/local/bin/go-euc-console-wizard.sh /usr/local/bin/go-euc-autogrow.sh /usr/local/bin/go-euc-upgrade.sh /usr/local/bin/go-euc-appliance-update.sh /usr/local/bin/go-euc-webfiles.py /usr/local/bin/go-euc-ensure-ssh.sh /usr/local/bin/go-euc-postsetup-cleanup.sh /opt/go-euc-installer/scripts/step1_install_base.sh /etc/profile.d/go-euc-login-hook.sh" \
+  --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-publish-telegraf-config.sh:/usr/local/bin" \
+  --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-letsencrypt-deploy-hook.sh:/usr/local/bin" \
+  --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-collector.sh:/usr/local/bin" \
+  --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-local-access.sh:/usr/local/bin" \
+  --copy-in "${ROOT_DIR}/appliance/collectors:/opt/go-euc-installer" \
+  --run-command "chmod 644 /opt/go-euc-installer/collectors/*.conf" \
+  --run-command "chmod +x /usr/local/bin/go-euc-firstboot.sh /usr/local/bin/go-euc-console-wizard.sh /usr/local/bin/go-euc-autogrow.sh /usr/local/bin/go-euc-upgrade.sh /usr/local/bin/go-euc-appliance-update.sh /usr/local/bin/go-euc-webfiles.py /usr/local/bin/go-euc-ensure-ssh.sh /usr/local/bin/go-euc-postsetup-cleanup.sh /usr/local/bin/go-euc-publish-telegraf-config.sh /usr/local/bin/go-euc-letsencrypt-deploy-hook.sh /usr/local/bin/go-euc-collector.sh /usr/local/bin/go-euc-local-access.sh /opt/go-euc-installer/scripts/step1_install_base.sh /etc/profile.d/go-euc-login-hook.sh" \
   --run-command "ln -sf /etc/systemd/system/go-euc-firstboot.service /etc/systemd/system/multi-user.target.wants/go-euc-firstboot.service" \
   --run-command "ln -sf /etc/systemd/system/go-euc-autogrow.service /etc/systemd/system/multi-user.target.wants/go-euc-autogrow.service" \
   --run-command "ln -sf /etc/systemd/system/go-euc-ensure-ssh.service /etc/systemd/system/multi-user.target.wants/go-euc-ensure-ssh.service" \

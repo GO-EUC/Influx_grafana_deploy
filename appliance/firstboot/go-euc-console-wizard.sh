@@ -58,12 +58,18 @@ APPLIANCE_DNS="${APPLIANCE_DNS:-${DEFAULT_DNS:-1.1.1.1,8.8.8.8}}"
 
 echo
 echo "Appliance login user is: goeucadmin"
-echo "Default password is currently: goeucadmin"
+echo "This account is also the login for the appliance web page (https://<appliance>/)."
+echo "The default password must be replaced (minimum 8 characters)."
 while true; do
-  read -r -s -p "Enter new goeucadmin password (leave blank to keep current): " APPLIANCE_LOGIN_PASSWORD
+  read -r -s -p "Enter new goeucadmin password: " APPLIANCE_LOGIN_PASSWORD
   echo
-  if [[ -z "${APPLIANCE_LOGIN_PASSWORD}" ]]; then
-    break
+  if [[ "${#APPLIANCE_LOGIN_PASSWORD}" -lt 8 ]]; then
+    echo "Password must be at least 8 characters."
+    continue
+  fi
+  if [[ "${APPLIANCE_LOGIN_PASSWORD}" == "goeucadmin" ]]; then
+    echo "Choose a password other than the default."
+    continue
   fi
 
   read -r -s -p "Confirm new password: " APPLIANCE_LOGIN_PASSWORD_CONFIRM
@@ -80,19 +86,15 @@ if [[ -f "${CONFIG_FILE}" ]]; then
   grep -Ev '^(APPLIANCE_NAME|APPLIANCE_HOSTNAME|APPLIANCE_NET_IFACE|APPLIANCE_STATIC_IP_CIDR|APPLIANCE_GATEWAY|APPLIANCE_DNS|APPLIANCE_LOGIN_PASSWORD)=' "${CONFIG_FILE}" > "${TMP_FILE}" || true
 fi
 
-cat >> "${TMP_FILE}" <<EOF
-APPLIANCE_NAME=${APPLIANCE_NAME}
-APPLIANCE_NET_IFACE=${APPLIANCE_NET_IFACE}
-APPLIANCE_STATIC_IP_CIDR=${APPLIANCE_STATIC_IP_CIDR}
-APPLIANCE_GATEWAY=${APPLIANCE_GATEWAY}
-APPLIANCE_DNS=${APPLIANCE_DNS}
-EOF
-
-if [[ -n "${APPLIANCE_LOGIN_PASSWORD}" ]]; then
-  cat >> "${TMP_FILE}" <<EOF
-APPLIANCE_LOGIN_PASSWORD=${APPLIANCE_LOGIN_PASSWORD}
-EOF
-fi
+# config.env is sourced by root scripts: shell-quote every value with %q.
+{
+  printf 'APPLIANCE_NAME=%q\n' "${APPLIANCE_NAME}"
+  printf 'APPLIANCE_NET_IFACE=%q\n' "${APPLIANCE_NET_IFACE}"
+  printf 'APPLIANCE_STATIC_IP_CIDR=%q\n' "${APPLIANCE_STATIC_IP_CIDR}"
+  printf 'APPLIANCE_GATEWAY=%q\n' "${APPLIANCE_GATEWAY}"
+  printf 'APPLIANCE_DNS=%q\n' "${APPLIANCE_DNS}"
+  printf 'APPLIANCE_LOGIN_PASSWORD=%q\n' "${APPLIANCE_LOGIN_PASSWORD}"
+} >> "${TMP_FILE}"
 
 mv "${TMP_FILE}" "${CONFIG_FILE}"
 chmod 600 "${CONFIG_FILE}"

@@ -1,0 +1,215 @@
+
+###############################################################################
+# Proxmox node: @@NODE@@
+###############################################################################
+
+# VMs and LXC containers on this node (Telegraf proxmox plugin: status, CPU load,
+# memory, swap, disk usage, disk read/write and network bytes per guest).
+[[inputs.proxmox]]
+  base_url = "${COLLECTOR_URL}/api2/json"
+  api_token = "${COLLECTOR_USERNAME}=${COLLECTOR_PASSWORD}"
+  node_name = "@@NODE@@"
+  additional_vmstats_tags = ["vmid", "status"]
+  insecure_skip_verify = ${COLLECTOR_INSECURE_SKIP_VERIFY}
+  response_timeout = "15s"
+
+# Node status: CPU, iowait, load averages, memory, swap, root filesystem, KSM, uptime, CPU info.
+[[inputs.http]]
+  urls = ["${COLLECTOR_URL}/api2/json/nodes/@@NODE@@/status"]
+  method = "GET"
+  headers = { Authorization = "PVEAPIToken=${COLLECTOR_USERNAME}=${COLLECTOR_PASSWORD}" }
+  interval = "10s"
+  timeout = "15s"
+  insecure_skip_verify = ${COLLECTOR_INSECURE_SKIP_VERIFY}
+  data_format = "json_v2"
+
+  [inputs.http.tags]
+    node = "@@NODE@@"
+
+  [[inputs.http.json_v2]]
+    measurement_name = "proxmox_node"
+
+    [[inputs.http.json_v2.tag]]
+      path = "data.pveversion"
+      rename = "pve_version"
+      optional = true
+
+    [[inputs.http.json_v2.field]]
+      path = "data.cpu"
+      rename = "cpu"
+      type = "float"
+      optional = true
+
+    [[inputs.http.json_v2.field]]
+      path = "data.wait"
+      rename = "iowait"
+      type = "float"
+      optional = true
+
+    [[inputs.http.json_v2.field]]
+      path = "data.idle"
+      rename = "idle"
+      type = "float"
+      optional = true
+
+    [[inputs.http.json_v2.field]]
+      path = "data.loadavg.0"
+      rename = "load1"
+      type = "float"
+      optional = true
+
+    [[inputs.http.json_v2.field]]
+      path = "data.loadavg.1"
+      rename = "load5"
+      type = "float"
+      optional = true
+
+    [[inputs.http.json_v2.field]]
+      path = "data.loadavg.2"
+      rename = "load15"
+      type = "float"
+      optional = true
+
+    [[inputs.http.json_v2.field]]
+      path = "data.memory.total"
+      rename = "memory_total"
+      type = "int"
+      optional = true
+
+    [[inputs.http.json_v2.field]]
+      path = "data.memory.used"
+      rename = "memory_used"
+      type = "int"
+      optional = true
+
+    [[inputs.http.json_v2.field]]
+      path = "data.memory.free"
+      rename = "memory_free"
+      type = "int"
+      optional = true
+
+    [[inputs.http.json_v2.field]]
+      path = "data.memory.available"
+      rename = "memory_available"
+      type = "int"
+      optional = true
+
+    [[inputs.http.json_v2.field]]
+      path = "data.swap.total"
+      rename = "swap_total"
+      type = "int"
+      optional = true
+
+    [[inputs.http.json_v2.field]]
+      path = "data.swap.used"
+      rename = "swap_used"
+      type = "int"
+      optional = true
+
+    [[inputs.http.json_v2.field]]
+      path = "data.swap.free"
+      rename = "swap_free"
+      type = "int"
+      optional = true
+
+    [[inputs.http.json_v2.field]]
+      path = "data.rootfs.total"
+      rename = "rootfs_total"
+      type = "int"
+      optional = true
+
+    [[inputs.http.json_v2.field]]
+      path = "data.rootfs.used"
+      rename = "rootfs_used"
+      type = "int"
+      optional = true
+
+    [[inputs.http.json_v2.field]]
+      path = "data.rootfs.free"
+      rename = "rootfs_free"
+      type = "int"
+      optional = true
+
+    [[inputs.http.json_v2.field]]
+      path = "data.rootfs.avail"
+      rename = "rootfs_avail"
+      type = "int"
+      optional = true
+
+    [[inputs.http.json_v2.field]]
+      path = "data.ksm.shared"
+      rename = "ksm_shared"
+      type = "int"
+      optional = true
+
+    [[inputs.http.json_v2.field]]
+      path = "data.uptime"
+      rename = "uptime"
+      type = "int"
+      optional = true
+
+    [[inputs.http.json_v2.field]]
+      path = "data.cpuinfo.cpus"
+      rename = "cpu_threads"
+      type = "int"
+      optional = true
+
+    [[inputs.http.json_v2.field]]
+      path = "data.cpuinfo.cores"
+      rename = "cpu_cores"
+      type = "int"
+      optional = true
+
+    [[inputs.http.json_v2.field]]
+      path = "data.cpuinfo.sockets"
+      rename = "cpu_sockets"
+      type = "int"
+      optional = true
+
+    [[inputs.http.json_v2.field]]
+      path = "data.cpuinfo.mhz"
+      rename = "cpu_mhz"
+      type = "float"
+      optional = true
+
+# Node history at 1-minute resolution (last hour, re-read every minute; points are
+# timestamped so re-reads overwrite rather than duplicate): adds node network
+# throughput, ZFS ARC size and pressure stall information.
+[[inputs.http]]
+  urls = ["${COLLECTOR_URL}/api2/json/nodes/@@NODE@@/rrddata?timeframe=hour&cf=AVERAGE"]
+  method = "GET"
+  headers = { Authorization = "PVEAPIToken=${COLLECTOR_USERNAME}=${COLLECTOR_PASSWORD}" }
+  interval = "60s"
+  timeout = "30s"
+  insecure_skip_verify = ${COLLECTOR_INSECURE_SKIP_VERIFY}
+  data_format = "json_v2"
+
+  [inputs.http.tags]
+    node = "@@NODE@@"
+
+  [[inputs.http.json_v2]]
+    measurement_name = "proxmox_node_rrd"
+    [[inputs.http.json_v2.object]]
+      path = "data"
+      timestamp_key = "time"
+      timestamp_format = "unix"
+      included_keys = ["cpu", "maxcpu", "iowait", "loadavg", "memtotal", "memused", "swaptotal", "swapused", "roottotal", "rootused", "netin", "netout", "arcsize", "pressurecpusome", "pressureiosome", "pressureiofull", "pressurememorysome", "pressurememoryfull"]
+      [inputs.http.json_v2.object.fields]
+        cpu = "float"
+        maxcpu = "float"
+        iowait = "float"
+        loadavg = "float"
+        memtotal = "float"
+        memused = "float"
+        swaptotal = "float"
+        swapused = "float"
+        roottotal = "float"
+        rootused = "float"
+        netin = "float"
+        netout = "float"
+        arcsize = "float"
+        pressurecpusome = "float"
+        pressureiosome = "float"
+        pressureiofull = "float"
+        pressurememorysome = "float"
+        pressurememoryfull = "float"

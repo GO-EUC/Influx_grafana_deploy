@@ -44,6 +44,16 @@ CREDENTIALS_FILE="${INSTALL_ROOT}/credentials.env"
 NGINX_CONF_DIR="${INSTALL_ROOT}/nginx/conf.d"
 NGINX_CERT_DIR="${INSTALL_ROOT}/nginx/certs"
 NGINX_ACME_WEBROOT="${INSTALL_ROOT}/nginx/acme"
+NGINX_AUTH_DIR="${INSTALL_ROOT}/nginx/auth"
+DASHBOARD_URL_CONFIG_FILE="/etc/go-euc/dashboard-url"
+DEFAULT_DASHBOARDS_ZIP_URL="https://goeucartifacts4hiu9i.blob.core.windows.net/files/Dashboards.zip"
+
+# Pinned container images (bump deliberately; Grafana/Portainer cannot be downgraded safely).
+INFLUXDB_IMAGE="influxdb:2.7"
+GRAFANA_IMAGE="grafana/grafana:13.3"
+PORTAINER_IMAGE="portainer/portainer-ce:2.45.4"
+GOEUCWEB_IMAGE="goeuc/webserver:2004.01"
+NGINX_IMAGE="nginx:1.27-alpine"
 
 # Load previously generated credentials/settings so reruns are stable.
 if [[ -f "${CREDENTIALS_FILE}" ]]; then
@@ -51,16 +61,12 @@ if [[ -f "${CREDENTIALS_FILE}" ]]; then
   source "${CREDENTIALS_FILE}"
 fi
 
-# Generate deterministic-length secrets from a safe character set.
+# Generate alphanumeric secrets from a cryptographically secure source.
 generate_secret() {
   local length="${1:-20}"
-  local charset='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@%+='
-  local i
-  local output=""
-  for ((i = 0; i < length; i++)); do
-    output+="${charset:RANDOM%${#charset}:1}"
-  done
-  printf '%s' "${output}"
+  python3 -c 'import secrets, string, sys
+alphabet = string.ascii_letters + string.digits
+sys.stdout.write("".join(secrets.choice(alphabet) for _ in range(int(sys.argv[1]))))' "${length}"
 }
 
 PORTAINER_ADMIN_USER="${PORTAINER_ADMIN_USER:-${SAVED_PORTAINER_ADMIN_USER:-admin}}"
@@ -72,35 +78,55 @@ INFLUX_INIT_BUCKET="${INFLUX_INIT_BUCKET:-${SAVED_INFLUX_INIT_BUCKET:-bootstrap}
 INFLUX_ADMIN_TOKEN="${INFLUX_ADMIN_TOKEN:-${SAVED_INFLUX_ADMIN_TOKEN:-$(generate_secret 40)}}"
 INFLUX_BUCKET_PERFORMANCE="${INFLUX_BUCKET_PERFORMANCE:-Performance}"
 INFLUX_BUCKET_TESTS="${INFLUX_BUCKET_TESTS:-Tests}"
+INFLUX_BUCKET_PROXMOX="${INFLUX_BUCKET_PROXMOX:-Proxmox}"
 GRAFANA_ADMIN_USER="${GRAFANA_ADMIN_USER:-${SAVED_GRAFANA_ADMIN_USER:-admin}}"
 GRAFANA_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-${SAVED_GRAFANA_ADMIN_PASSWORD:-$(generate_secret 20)}}"
-# Hardcoded dashboard bundle URL (version-controlled artifact location).
-DASHBOARDS_ZIP_URL="https://goeucartifacts4hiu9i.blob.core.windows.net/files/Dashboards.zip"
+# Write-only token handed to Telegraf clients (created after InfluxDB is up).
+TELEGRAF_WRITE_TOKEN="${SAVED_TELEGRAF_WRITE_TOKEN:-}"
+# Write-only token for Proxmox VE's built-in Metric Server (pushes to the Proxmox bucket).
+PROXMOX_WRITE_TOKEN="${SAVED_PROXMOX_WRITE_TOKEN:-}"
+# Dashboard bundle URL: explicit env override > appliance config > default artifact location.
+if [[ -z "${DASHBOARDS_ZIP_URL:-}" && -s "${DASHBOARD_URL_CONFIG_FILE}" ]]; then
+  DASHBOARDS_ZIP_URL="$(tr -d '\r\n' < "${DASHBOARD_URL_CONFIG_FILE}")"
+fi
+DASHBOARDS_ZIP_URL="${DASHBOARDS_ZIP_URL:-${DEFAULT_DASHBOARDS_ZIP_URL}}"
 GRAFANA_DATASOURCE_NAME="DS_GO"
 GRAFANA_DATASOURCE_UID="DS_GO"
 
 # Persist resolved values for idempotent reruns and easier troubleshooting.
-mkdir -p "${INSTALL_ROOT}"
-cat > "${CREDENTIALS_FILE}" <<EOF
-SAVED_PORTAINER_ADMIN_USER='${PORTAINER_ADMIN_USER}'
-SAVED_PORTAINER_ADMIN_PASSWORD='${PORTAINER_ADMIN_PASSWORD}'
-SAVED_INFLUX_ADMIN_USER='${INFLUX_ADMIN_USER}'
-SAVED_INFLUX_ADMIN_PASSWORD='${INFLUX_ADMIN_PASSWORD}'
-SAVED_INFLUX_ADMIN_ORG='${INFLUX_ADMIN_ORG}'
-SAVED_INFLUX_INIT_BUCKET='${INFLUX_INIT_BUCKET}'
-SAVED_INFLUX_ADMIN_TOKEN='${INFLUX_ADMIN_TOKEN}'
-SAVED_GRAFANA_ADMIN_USER='${GRAFANA_ADMIN_USER}'
-SAVED_GRAFANA_ADMIN_PASSWORD='${GRAFANA_ADMIN_PASSWORD}'
-EOF
-chmod 600 "${CREDENTIALS_FILE}"
+# Values are shell-quoted with %q so any characters survive being sourced.
+write_credentials_file() {
+  mkdir -p "${INSTALL_ROOT}"
+  (
+    umask 077
+    {
+      printf 'SAVED_PORTAINER_ADMIN_USER=%q\n' "${PORTAINER_ADMIN_USER}"
+      printf 'SAVED_PORTAINER_ADMIN_PASSWORD=%q\n' "${PORTAINER_ADMIN_PASSWORD}"
+      printf 'SAVED_INFLUX_ADMIN_USER=%q\n' "${INFLUX_ADMIN_USER}"
+      printf 'SAVED_INFLUX_ADMIN_PASSWORD=%q\n' "${INFLUX_ADMIN_PASSWORD}"
+      printf 'SAVED_INFLUX_ADMIN_ORG=%q\n' "${INFLUX_ADMIN_ORG}"
+      printf 'SAVED_INFLUX_INIT_BUCKET=%q\n' "${INFLUX_INIT_BUCKET}"
+      printf 'SAVED_INFLUX_ADMIN_TOKEN=%q\n' "${INFLUX_ADMIN_TOKEN}"
+      printf 'SAVED_TELEGRAF_WRITE_TOKEN=%q\n' "${TELEGRAF_WRITE_TOKEN}"
+      printf 'SAVED_PROXMOX_WRITE_TOKEN=%q\n' "${PROXMOX_WRITE_TOKEN}"
+      printf 'SAVED_GRAFANA_ADMIN_USER=%q\n' "${GRAFANA_ADMIN_USER}"
+      printf 'SAVED_GRAFANA_ADMIN_PASSWORD=%q\n' "${GRAFANA_ADMIN_PASSWORD}"
+    } > "${CREDENTIALS_FILE}"
+  )
+  chmod 600 "${CREDENTIALS_FILE}"
+}
+write_credentials_file
 
 PORTAINER_CREDS_STATUS="configured"
+PORTAINER_PASSWORD_DISPLAY="${PORTAINER_ADMIN_PASSWORD}"
 INFLUX_STATUS="unknown"
 GRAFANA_STATUS="unknown"
 DASHBOARD_IMPORT_STATUS="not-configured"
 DASHBOARD_JSON_COUNT="0"
 GRAFANA_DATASOURCE_STATUS="unknown"
 GOEUCWEB_STATUS="not-started"
+TELEGRAF_TOKEN_STATUS="not-created"
+PROXMOX_TOKEN_STATUS="not-created"
 
 # Poll an HTTP endpoint until an expected status code is returned.
 wait_for_http() {
@@ -137,6 +163,91 @@ ensure_influx_bucket() {
     --token "${INFLUX_ADMIN_TOKEN}" >/dev/null
 }
 
+# ensure_bucket_write_token <bucket> <description> <existing-token>
+# Ensures a write-only token scoped to <bucket> exists, so the all-access admin token never
+# has to be distributed. Reuses <existing-token> while it is still active. Sets ENSURED_TOKEN
+# (empty on failure) and ENSURED_STATUS (exists|created|bucket-lookup-failed|create-failed).
+ensure_bucket_write_token() {
+  local bucket_name="$1"
+  local description="$2"
+  local existing_token="$3"
+  local auth_json=""
+  local bucket_id=""
+  local new_token=""
+
+  ENSURED_TOKEN=""
+  if [[ -n "${existing_token}" ]]; then
+    auth_json="$(docker exec influxdb influx auth list --org "${INFLUX_ADMIN_ORG}" --token "${INFLUX_ADMIN_TOKEN}" --json 2>/dev/null || true)"
+    if printf '%s' "${auth_json}" | python3 -c 'import json, sys
+token = sys.argv[1]
+auths = json.load(sys.stdin)
+sys.exit(0 if any(a.get("token") == token and a.get("status", "active") == "active" for a in auths) else 1)' "${existing_token}" 2>/dev/null; then
+      ENSURED_TOKEN="${existing_token}"
+      ENSURED_STATUS="exists"
+      return 0
+    fi
+  fi
+
+  bucket_id="$(
+    docker exec influxdb influx bucket list \
+      --name "${bucket_name}" \
+      --org "${INFLUX_ADMIN_ORG}" \
+      --token "${INFLUX_ADMIN_TOKEN}" \
+      --json 2>/dev/null \
+      | python3 -c 'import json, sys
+buckets = json.load(sys.stdin)
+print(buckets[0]["id"] if buckets else "")' 2>/dev/null || true
+  )"
+  if [[ -z "${bucket_id}" ]]; then
+    ENSURED_STATUS="bucket-lookup-failed"
+    return 1
+  fi
+
+  new_token="$(
+    docker exec influxdb influx auth create \
+      --org "${INFLUX_ADMIN_ORG}" \
+      --token "${INFLUX_ADMIN_TOKEN}" \
+      --write-bucket "${bucket_id}" \
+      --description "${description}" \
+      --json 2>/dev/null \
+      | python3 -c 'import json, sys
+auth = json.load(sys.stdin)
+if isinstance(auth, list):
+    auth = auth[0] if auth else {}
+print(auth.get("token", ""))' 2>/dev/null || true
+  )"
+  if [[ -z "${new_token}" ]]; then
+    ENSURED_STATUS="create-failed"
+    return 1
+  fi
+
+  ENSURED_TOKEN="${new_token}"
+  ENSURED_STATUS="created"
+}
+
+# Telegraf clients and the appliance collectors write to the Performance bucket.
+ensure_telegraf_write_token() {
+  ensure_bucket_write_token "${INFLUX_BUCKET_PERFORMANCE}" \
+    "GO-EUC Telegraf write-only (${INFLUX_BUCKET_PERFORMANCE})" "${TELEGRAF_WRITE_TOKEN}" || true
+  TELEGRAF_TOKEN_STATUS="${ENSURED_STATUS}"
+  if [[ -n "${ENSURED_TOKEN}" && "${ENSURED_TOKEN}" != "${TELEGRAF_WRITE_TOKEN}" ]]; then
+    TELEGRAF_WRITE_TOKEN="${ENSURED_TOKEN}"
+    write_credentials_file
+  fi
+}
+
+# Proxmox VE's built-in Metric Server pushes to its own bucket: its measurement names
+# (system, cpustat, memory, ...) would otherwise collide with the Windows Telegraf data.
+ensure_proxmox_push_token() {
+  ensure_bucket_write_token "${INFLUX_BUCKET_PROXMOX}" \
+    "GO-EUC Proxmox Metric Server write-only (${INFLUX_BUCKET_PROXMOX})" "${PROXMOX_WRITE_TOKEN}" || true
+  PROXMOX_TOKEN_STATUS="${ENSURED_STATUS}"
+  if [[ -n "${ENSURED_TOKEN}" && "${ENSURED_TOKEN}" != "${PROXMOX_WRITE_TOKEN}" ]]; then
+    PROXMOX_WRITE_TOKEN="${ENSURED_TOKEN}"
+    write_credentials_file
+  fi
+}
+
 # Download dashboard ZIP, extract it, and normalize known datasource placeholders.
 download_dashboards_zip() {
   local url="$1"
@@ -153,8 +264,9 @@ download_dashboards_zip() {
   fi
 
   # Replace previously extracted dashboards with the latest bundle contents.
+  # macOS metadata (__MACOSX/, ._*) is skipped so Grafana only sees real dashboards.
   rm -rf "${STACK_DIR}/grafana/dashboards/"*
-  if ! unzip -oq "${tmp_zip}" -d "${STACK_DIR}/grafana/dashboards"; then
+  if ! unzip -oq "${tmp_zip}" -d "${STACK_DIR}/grafana/dashboards" -x '__MACOSX/*' '._*' '*/._*'; then
     rm -f "${tmp_zip}"
     DASHBOARD_IMPORT_STATUS="extract-failed"
     shopt -u globstar nullglob
@@ -283,11 +395,10 @@ if ! docker ps -a --format '{{.Names}}' | grep -q '^portainer$'; then
     --name portainer \
     --restart=always \
     --network "${NETWORK_NAME}" \
-    -p 8000:8000 \
     -p 9443:9443 \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v portainer_data:/data \
-    portainer/portainer-ce:latest \
+    "${PORTAINER_IMAGE}" \
     --base-url /portainer >/dev/null
 fi
 
@@ -298,11 +409,10 @@ if ! docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{printf "%s
     --name portainer \
     --restart=always \
     --network "${NETWORK_NAME}" \
-    -p 8000:8000 \
     -p 9443:9443 \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v portainer_data:/data \
-    portainer/portainer-ce:latest \
+    "${PORTAINER_IMAGE}" \
     --base-url /portainer >/dev/null
 fi
 
@@ -344,16 +454,16 @@ if [[ "${PORTAINER_READY}" -eq 1 ]]; then
       ;;
     409|422)
       PORTAINER_CREDS_STATUS="already-initialized"
-      PORTAINER_ADMIN_PASSWORD="<already-set>"
+      PORTAINER_PASSWORD_DISPLAY="<already-set>"
       ;;
     *)
       PORTAINER_CREDS_STATUS="init-failed"
-      PORTAINER_ADMIN_PASSWORD="<unknown>"
+      PORTAINER_PASSWORD_DISPLAY="<unknown>"
       ;;
   esac
 else
   PORTAINER_CREDS_STATUS="portainer-unreachable"
-  PORTAINER_ADMIN_PASSWORD="<unknown>"
+  PORTAINER_PASSWORD_DISPLAY="<unknown>"
 fi
 
 # --- Generate stack files and provisioning definitions ---
@@ -362,7 +472,7 @@ mkdir -p "${STACK_DIR}"/{grafana,influxdb}
 mkdir -p "${STACK_DIR}/grafana/data" "${STACK_DIR}/influxdb/data" "${STACK_DIR}/influxdb/config"
 mkdir -p "${STACK_DIR}/grafana/provisioning/datasources"
 mkdir -p "${STACK_DIR}/grafana/provisioning/dashboards" "${STACK_DIR}/grafana/dashboards"
-mkdir -p "${NGINX_CONF_DIR}" "${NGINX_CERT_DIR}" "${NGINX_ACME_WEBROOT}"
+mkdir -p "${NGINX_CONF_DIR}" "${NGINX_CERT_DIR}" "${NGINX_ACME_WEBROOT}" "${NGINX_AUTH_DIR}"
 chown -R 472:472 "${STACK_DIR}/grafana/data" || true
 
 # Grafana datasource provisioning file (InfluxDB/Flux).
@@ -411,14 +521,15 @@ else
 fi
 
 # Docker Compose definition for InfluxDB and Grafana services.
+# InfluxDB/Grafana ports are bound to localhost only; remote access goes through nginx HTTPS.
 cat > "${STACK_DIR}/docker-compose.yml" <<YAML
 services:
   influxdb:
-    image: influxdb:2.7
+    image: ${INFLUXDB_IMAGE}
     container_name: influxdb
     restart: unless-stopped
     ports:
-      - "8086:8086"
+      - "127.0.0.1:8086:8086"
     volumes:
       - ./influxdb/data:/var/lib/influxdb2
       - ./influxdb/config:/etc/influxdb2
@@ -434,11 +545,11 @@ services:
       - monitoring_net
 
   grafana:
-    image: grafana/grafana:latest
+    image: ${GRAFANA_IMAGE}
     container_name: grafana
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - ./grafana/data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning
@@ -454,14 +565,14 @@ services:
       - influxdb
 
   goeucweb:
-    image: goeuc/webserver:latest
+    image: ${GOEUCWEB_IMAGE}
     container_name: goeucweb
     restart: unless-stopped
     networks:
       - monitoring_net
 
   nginx:
-    image: nginx:1.27-alpine
+    image: ${NGINX_IMAGE}
     container_name: goeuc-nginx
     restart: unless-stopped
     ports:
@@ -472,6 +583,7 @@ services:
       - ${NGINX_CONF_DIR}/default.conf:/etc/nginx/conf.d/default.conf:ro
       - ${NGINX_CERT_DIR}:/etc/nginx/certs:ro
       - ${NGINX_ACME_WEBROOT}:/var/www/acme:rw
+      - ${NGINX_AUTH_DIR}:/etc/nginx/auth:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
@@ -509,6 +621,10 @@ if wait_for_http "http://localhost:8086/influx/health" "200" 90 2 || wait_for_ht
   echo "==> Ensuring required Influx buckets exist"
   ensure_influx_bucket "${INFLUX_BUCKET_PERFORMANCE}"
   ensure_influx_bucket "${INFLUX_BUCKET_TESTS}"
+  ensure_influx_bucket "${INFLUX_BUCKET_PROXMOX}"
+  echo "==> Ensuring write-only tokens exist (Telegraf, Proxmox Metric Server)"
+  ensure_telegraf_write_token
+  ensure_proxmox_push_token
 else
   INFLUX_STATUS="not-ready"
 fi
@@ -532,18 +648,20 @@ echo "- InfluxDB: https://<vm-ip>/influx/"
 echo "- Portainer: https://<vm-ip>/portainer/"
 echo "- GO-EUC Web: https://<vm-ip>/goeucweb/"
 echo "  - status:   ${GOEUCWEB_STATUS}"
-echo "- Portainer direct: https://<vm-ip>:9443"
+echo "- Portainer direct: https://<vm-ip>:9443 (InfluxDB/Grafana direct ports are localhost-only)"
 echo "  - username: ${PORTAINER_ADMIN_USER}"
-echo "  - password: ${PORTAINER_ADMIN_PASSWORD}"
+echo "  - password: ${PORTAINER_PASSWORD_DISPLAY}"
 echo "  - status:   ${PORTAINER_CREDS_STATUS}"
-echo "- InfluxDB direct: http://<vm-ip>:8086/influx/"
+echo "- InfluxDB: https://<vm-ip>/influx/"
 echo "  - username: ${INFLUX_ADMIN_USER}"
 echo "  - password: ${INFLUX_ADMIN_PASSWORD}"
 echo "  - org:      ${INFLUX_ADMIN_ORG}"
-echo "  - buckets:  ${INFLUX_BUCKET_PERFORMANCE}, ${INFLUX_BUCKET_TESTS}"
-echo "  - token:    ${INFLUX_ADMIN_TOKEN}"
+echo "  - buckets:  ${INFLUX_BUCKET_PERFORMANCE}, ${INFLUX_BUCKET_TESTS}, ${INFLUX_BUCKET_PROXMOX}"
+echo "  - admin token: stored in ${CREDENTIALS_FILE}"
+echo "  - telegraf write token: ${TELEGRAF_TOKEN_STATUS}"
+echo "  - proxmox metric server token: ${PROXMOX_TOKEN_STATUS}"
 echo "  - status:   ${INFLUX_STATUS}"
-echo "- Grafana direct: http://<vm-ip>:3000/grafana/"
+echo "- Grafana: https://<vm-ip>/grafana/"
 echo "  - username: ${GRAFANA_ADMIN_USER}"
 echo "  - password: ${GRAFANA_ADMIN_PASSWORD}"
 echo "  - dashboard ZIP URL: ${DASHBOARDS_ZIP_URL:-<not-set>}"
@@ -560,6 +678,3 @@ if [[ "${GRAFANA_STATUS}" != "ready" ]]; then
 fi
 echo
 echo "Credentials file: ${CREDENTIALS_FILE}"
-echo
-echo "Next step: add automated bootstrap for credentials, buckets, API token,"
-echo "Grafana datasource provisioning, and dashboard import."
