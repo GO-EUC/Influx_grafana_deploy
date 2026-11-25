@@ -186,6 +186,67 @@ print("\n".join(nodes))
 PY
 }
 
+# Pre-flight: prove the target is reachable (and, where possible, that the credentials work)
+# before starting the container. Telegraf plugins only connect on their first collection and
+# can wait out a long timeout, so without this an unreachable vCenter would look healthy.
+#   vsphere: GET /sdk/vimServiceVersions.xml (unauthenticated): address + TLS
+#   nutanix: GET /api/nutanix/v2.0/cluster with the credentials: address + TLS + login
+#   proxmox: node discovery (render_config) does the same with the API token
+preflight_check() {
+  [[ "${COLLECTOR_TYPE}" == "proxmox" ]] && return 0
+  log "Checking ${COLLECTOR_URL}..."
+  if ! GOEUC_TYPE="${COLLECTOR_TYPE}" \
+      GOEUC_URL="${COLLECTOR_URL}" \
+      GOEUC_USERNAME="${COLLECTOR_USERNAME}" \
+      GOEUC_PASSWORD="${COLLECTOR_PASSWORD}" \
+      GOEUC_INSECURE="${COLLECTOR_INSECURE_SKIP_VERIFY}" \
+      python3 - <<'PY'
+import base64
+import os
+import ssl
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+kind = os.environ["GOEUC_TYPE"]
+base = os.environ["GOEUC_URL"]
+context = ssl.create_default_context()
+if os.environ["GOEUC_INSECURE"] != "false":
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+if kind == "vsphere":
+    parts = urllib.parse.urlsplit(base)
+    url = f"{parts.scheme}://{parts.netloc}/sdk/vimServiceVersions.xml"
+    headers = {}
+else:
+    url = base + "/api/nutanix/v2.0/cluster"
+    token = base64.b64encode(f"{os.environ['GOEUC_USERNAME']}:{os.environ['GOEUC_PASSWORD']}".encode()).decode()
+    headers = {"Authorization": "Basic " + token, "Accept": "application/json"}
+try:
+    with urllib.request.urlopen(urllib.request.Request(url, headers=headers), context=context, timeout=15) as resp:
+        resp.read(4096)
+except urllib.error.HTTPError as exc:
+    if exc.code in (401, 403):
+        print(f"{url}: HTTP {exc.code} - the username or password was rejected.", file=sys.stderr)
+    else:
+        print(f"{url}: HTTP {exc.code} {exc.reason} - is this the right address?", file=sys.stderr)
+    sys.exit(1)
+except ssl.SSLError as exc:
+    print(f"{url}: TLS error ({exc.reason}). Untick 'Verify ... TLS certificate' for self-signed certificates.", file=sys.stderr)
+    sys.exit(1)
+except Exception as exc:  # DNS, connection refused, timeout
+    reason = getattr(exc, "reason", exc)
+    print(f"Cannot reach {url}: {reason}", file=sys.stderr)
+    sys.exit(1)
+print("reachable")
+PY
+  then
+    log "ERROR: pre-flight check failed (see message above); collector not started." >&2
+    exit 1
+  fi
+}
+
 # Render the collector's config into RENDERED_DIR: fill in @@INSECURE_SKIP_VERIFY@@ (a boolean,
 # which Telegraf will not substitute from the environment) and, for Proxmox, repeat the per-node
 # section for every discovered node. The result holds no secrets.
@@ -248,6 +309,7 @@ cmd_apply() {
     log "Telegraf config not found: ${TELEGRAF_CONFIG}" >&2
     exit 1
   fi
+  preflight_check
   write_runtime_env
   render_config
 

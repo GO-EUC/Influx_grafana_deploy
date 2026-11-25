@@ -92,11 +92,45 @@ A few things can't be scripted against the test environment:
 
 ## Test runs
 
-### 2026-11-25: build `20261125-143650-9ccba7a1` (commit `9ccba7a`)
-
-Environment:
+Environment for both runs:
 - Nutanix cluster NCE1: AOS 6.8.1, AHV, 1 node
 - VM: 4 vCPU, 8 GiB, AHV network `192.168.102.1/24` (VLAN 102), static IP `192.168.102.130/24`
 - Client: macOS on `192.168.2.0/24`, a different subnet from the appliance, so `/config.txt` must return 403
+- Collector target: the cluster's Prism Element
 
-Results: *in progress*
+### 2026-11-25 run 1: build `20261125-143650-9ccba7a1` (commit `9ccba7a`): failed, bugs fixed
+
+Deployment and unattended setup worked: image import 78 s, provisioning complete about 5 minutes after power-on. The checks found:
+
+| Area | Finding | Fix |
+|------|---------|-----|
+| InfluxDB API | `/influx/*` returned the InfluxDB web UI (200 HTML) for every request, because InfluxDB 2.7 has no base-path setting. Telegraf clients, collectors and Proxmox push all silently failed, and the installer's health check was fooled too. | nginx strips `/influx` for the API; UI and API over TLS on `:8086`; collectors write to `influxdb:8086`; health via `influx ping`. |
+| Landing page API | Every `/api/*` call returned 502: nginx used the Docker gateway, but the backend only listened on `127.0.0.1`. | nginx reaches the backend through a Unix socket shared only with its container. |
+| Portainer | `/portainer/` returned 404 (`--base-url` only affects generated links). | nginx strips the prefix and adds WebSocket headers. |
+| Collectors | Telegraf 1.40 rejected the configs: strict environment handling only substitutes inside quoted strings, and inserts values raw. | Raw env values; TLS setting rendered into the config. |
+| Grafana | 5 of 6 dashboards: `GO-EUC-Windows-Process-Analysis.json` is a bare v2 spec; the Test Runs dashboard reused the Process Analysis title. | `go-euc-grafana-dashboards.py` wraps bare v2 specs; title fixed in `Dashboards.zip`. |
+| Test suite | `config.txt` group is gid 101, which the host names `messagebus`. | Check compares numeric ids. |
+
+Console wizard (sandboxed): 8/8 passed.
+
+### 2026-11-25 run 2: build `20261125-151739-c4f1c519` (commit `c4f1c51`): passed
+
+Provisioning complete 255 s after power-on (unattended).
+
+| Suite | Result |
+|-------|--------|
+| `remote_checks.sh` (on-box) | 84 passed, 0 failed |
+| `http_checks.sh` (client) | 49 passed, 0 failed |
+| `wizard_check.sh` | 8 passed, 0 failed |
+| `collector_checks.sh` | 17 passed, 0 failed (after the pre-flight fix below) |
+| `maintenance_checks.sh` | Telegraf refresh, full update (77 s), collector refresh and reboot all passed. On-box checks after the reboot: 84 passed, 0 failed (after the bundle-aware dashboard check below). |
+
+Nutanix collector against the real Prism Element: one `nutanix_host` series for host `NTNX-e109371f-A`, all 27 fields stored as numbers. That's the 21 from the API plus the 6 derived `*_pct` / `*_Bps` / `memory_used_bytes` fields, for example `cpu_usage_pct` 7.1, `memory_usage_pct` 32.4, `vm_count` 15, `storage_usage_pct` 7.7.
+
+Found and fixed during run 2, verified on the running appliance (hot-patched), and included in the next build:
+- **An unreachable vCenter looked healthy.** The vSphere plugin only connects on its first collection, after the 45 s startup check. Collectors now run a pre-flight check (vCenter reachability and TLS; Prism Element login). The unreachable vCenter now fails in seconds with "Cannot reach ... collector not started".
+- **Test-only:** the full update correctly switched Grafana to the *published* bundle (`files/Dashboards.zip`, dated 2026-03-28: Analyzing, Comparing New, Troubleshooting). The dashboard check now compares Grafana with the bundle files actually on disk, not a fixed count of 6.
+
+Open items:
+- **Dashboard bundles differ.** The published bundle has a *Troubleshooting* dashboard that the repo's `Dashboards.zip` lacks, and the repo has 4 dashboards the published bundle lacks. `main` builds publish the repo bundle, so add Troubleshooting to the repo before merging, or appliances will lose it on their next full update.
+- Not covered by this environment: the manual checks above (real console wizard, browser walkthrough, `config.txt` from the appliance subnet, Windows client, real vCenter / Proxmox VE, Proxmox Metric Server push, Let's Encrypt).

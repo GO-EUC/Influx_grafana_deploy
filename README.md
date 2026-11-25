@@ -189,7 +189,12 @@ The appliance can collect hypervisor metrics itself, so no Windows machine is ne
 
 Configure them from the **Infrastructure collectors** section of `https://<appliance-ip>/`. Each collector has its own card: fill it in and click **Save and Start**.
 
-- Starting takes about a minute: the appliance waits for the first collection and shows the container log in the **Activity** panel, so a wrong address, password or TLS setting is reported straight away.
+- Before starting, the appliance checks the target:
+  - **vSphere**: vCenter is reachable with valid TLS
+  - **Nutanix**: the Prism Element API accepts the credentials
+  - **Proxmox**: node discovery works with the token
+
+  An unreachable address or bad TLS fails within seconds, and the container isn't started. Starting then takes about a minute: the appliance waits for the first collection and shows the container log in the **Activity** panel, so a rejected login or other collection error is reported straight away.
 - **Stop** removes the container but keeps the settings. Each card shows the current status.
 - Leave the password blank to keep the saved one when changing other settings.
 - **Verify the … TLS certificate**: leave unticked for systems with self-signed certificates.

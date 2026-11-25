@@ -29,6 +29,7 @@
 - **`/portainer/` returned 404.** Portainer's `--base-url` only changes generated links, so nginx now strips the prefix, and it adds WebSocket headers for container consoles.
 - **Collector configs failed under Telegraf 1.38+ strict environment handling**, which only substitutes variables inside quoted strings and inserts them raw. Collector env files now carry raw values (TOML-escaping them added stray backslashes to passwords). TLS verification is written into each config when the collector starts.
 - **One dashboard was never provisioned.** `GO-EUC-Windows-Process-Analysis.json` was a bare Grafana v2 spec, which file provisioning rejects. `go-euc-grafana-dashboards.py` wraps such exports into full `dashboard.grafana.app/v2` resources when the bundle is extracted.
+- **An unreachable vCenter looked healthy.** The vSphere plugin only connects on its first collection, after the startup check. Collectors now run a pre-flight check before starting (vCenter reachability and TLS; Prism Element login), so wrong addresses fail in seconds.
 - **Duplicate dashboard title**: the Test Runs dashboard was titled "GO-EUC: Windows Process Analysis"; it's now "GO-EUC: Windows Process Test Runs".
 
 ### Features

@@ -59,7 +59,7 @@ api "${BASE}/api/collectors/nutanix/status" >/dev/null
 [[ "$(field container_status)" == running ]] && ok "telegraf-nutanix running ($(field address))" || bad "telegraf-nutanix status: $(field container_status)"
 info "waiting 30s for more Nutanix samples"; sleep 30
 csv="$(flux 'from(bucket:"Performance") |> range(start:-3m) |> filter(fn:(r) => r._measurement == "nutanix_host") |> group(columns:["host","_field"]) |> last() |> keep(columns:["host","_field","_value"])')"
-hosts="$(awk -F, 'NR>1 && $0 !~ /^#/ && NF>3 {print $(NF)}' <<<"${csv}" | sort -u | wc -l | tr -d ' ')"
+hosts="$(grep -E ',cpu_usage_pct,' <<<"${csv}" | awk -F, '{print $NF}' | sort -u | wc -l | tr -d ' ')"
 for f in cpu_usage_pct memory_usage_pct hypervisor_iops controller_io_latency_us storage_capacity_bytes storage_usage_pct network_receive_Bps vm_count; do
   line="$(grep -E ",${f}," <<<"${csv}" | head -1)"
   [[ -n "${line}" ]] && ok "nutanix_host.${f} = $(cut -d, -f4- <<<"${line}" | cut -c1-60)" || bad "nutanix_host.${f} missing"
@@ -86,6 +86,10 @@ c="$(configure proxmox "${REQ}")"
 show_output 3
 api "${BASE}/api/collectors/proxmox/status" >/dev/null
 [[ "$(field container_status)" == not-created ]] && ok "no telegraf-proxmox container after failed discovery" || bad "telegraf-proxmox status: $(field container_status)"
+# Clean up: the deliberately broken Proxmox settings stay "enabled" (saved intent) until stopped,
+# and updates would keep retrying them.
+api -X POST "${BASE}/api/collectors/proxmox/disable" >/dev/null
+[[ "$(field ok)" == "True" ]] && ok "Proxmox test collector stopped (cleanup)" || bad "Proxmox disable: $(field message)"
 
 echo "===== password keep-on-blank"
 python3 - "${DIR}/nutanix.env" "${REQ}" <<'PY'

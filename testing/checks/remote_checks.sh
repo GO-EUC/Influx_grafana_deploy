@@ -92,8 +92,11 @@ ds_uid="$(gf /api/datasources/name/DS_GO | python3 -c 'import json,sys; print(js
 [[ "${ds_uid}" == "DS_GO" ]] && ok "datasource DS_GO provisioned" || bad "datasource DS_GO: '${ds_uid}'"
 dh="$(gf /api/datasources/uid/DS_GO/health | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",""))' 2>/dev/null)"
 [[ "${dh}" == "OK" ]] && ok "datasource DS_GO health OK" || bad "datasource DS_GO health: '${dh}'"
+# Every dashboard file in the provisioned bundle must be loaded, with unique titles. The bundle is
+# the repo's Dashboards.zip after first boot, or the published one after a full update.
+files="$(find /opt/influx-grafana/stack/grafana/dashboards -name '*.json' | wc -l | tr -d ' ')"
 n="$(gf '/api/search?type=dash-db' | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d), len({x["title"] for x in d}))' 2>/dev/null)"
-[[ "${n}" == "6 6" ]] && ok "6 dashboards provisioned, titles unique" || bad "dashboards provisioned / unique titles: ${n}"
+[[ "${n}" == "${files} ${files}" && "${files}" -gt 0 ]] && ok "${files} dashboard files -> ${files} dashboards provisioned, titles unique" || bad "dashboard files ${files}; provisioned / unique titles: ${n}"
 c="$(docker logs grafana 2>&1 | grep -c 'failed to save dashboard')"
 [[ "${c}" == 0 ]] && ok "no Grafana dashboard provisioning errors" || bad "Grafana logged ${c} 'failed to save dashboard' error(s)"
 ls -R /opt/influx-grafana/stack/grafana/dashboards | grep -q MACOSX && bad "__MACOSX files extracted" || ok "no __MACOSX files in dashboards"
