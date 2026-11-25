@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased (`dev`)
+
+### Fixes
+- **`/telegraf/` returned 403 Forbidden** after signing in (v2.0): nginx had no directory listing for the folder, so the landing page's *Browse /telegraf/* link and the Windows install guide led nowhere (individual files still downloaded). `/telegraf/` now shows a file listing behind the same login. Workaround on v2.0 appliances: open the files directly, e.g. `https://<ip>/telegraf/telegraf.conf`, `.../telegraf.exe`, `.../WINDOWS_INSTALL.html`.
+
+### Documentation
+- `docs/getting-started.md` corrected:
+  - **Telegraf downloads:** they come from `dl.influxdata.com`; GitHub is only used for the version lookup.
+  - **Let's Encrypt:** needs inbound port 80 from the internet and outbound access to `acme-v02.api.letsencrypt.org`.
+  - **Dashboards:** now listed by the data they need (`Tests`, and an `OBUX` bucket the appliance doesn't create).
+  - **Hyper-V:** Generation 1 because Gen 2 can't use `.vhd`.
+  - **Proxmox:** exact import commands.
+  - **Setup:** wait for the `PENDING-CONSOLE-CONFIG` screen before logging in, and realistic setup times.
+  - **Troubleshooting:** re-running the wizard to fix network settings.
+
 ## v2.0 (2026-11-25)
 
 Major release. Existing appliances move to it by deploying a new appliance and running `sudo go-euc-migrate <old-ip>` on it (see `docs/switching-appliances.md`).
