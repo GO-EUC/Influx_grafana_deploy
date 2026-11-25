@@ -1,18 +1,18 @@
 # GO-EUC Virtual Appliance
 
-This repository builds and publishes a deployable OVA virtual appliance that installs and configures:
+This repository builds and publishes the GO-EUC virtual appliance as an OVA (VMware) and a VHD (Hyper-V, Nutanix AHV and other hypervisors). The appliance installs and configures:
 
-- Portainer CE
+- Portainer CE, for managing all of the appliance's containers
 - InfluxDB 2.x
 - Grafana
 - GO-EUC web container (`goeuc/webserver`)
 - nginx HTTPS reverse proxy for all of the above
 - dashboard provisioning
 - downloadable Telegraf Windows client/config bundle over HTTPS
-- optional infrastructure collectors for VMware vSphere, Nutanix and Proxmox VE (Telegraf containers on the appliance), plus a ready-made Proxmox Metric Server target
-- Portainer for managing all of the appliance's containers
+- optional infrastructure collectors for VMware vSphere, Nutanix Prism Element and Proxmox VE (Telegraf containers on the appliance), plus a ready-made Proxmox Metric Server target
+- a landing page (`https://<appliance-ip>/`) that ties it all together
 
-The preferred way to use this project is the appliance image, not running the installer script manually.
+The preferred way to use this project is the appliance image, not running the installer script manually. See [CHANGELOG.md](CHANGELOG.md) for what changed, and [testing/README.md](testing/README.md) for the end-to-end test.
 
 ## What the appliance contains
 
@@ -23,11 +23,19 @@ The appliance is built from Ubuntu Noble cloud image and includes:
   - `Dashboards.zip`
   - `Telegraf/*`
   - first-boot and maintenance services under `appliance/firstboot/` and `appliance/maintenance/`
+  - infrastructure collector Telegraf configs under `appliance/collectors/` (installed at `/opt/go-euc-installer/collectors/`)
 - first-boot automation:
   - `go-euc-firstboot.service` (main provisioning orchestrator)
   - `go-euc-autogrow.service` (disk/filesystem growth fallback)
   - `go-euc-ensure-ssh.service` (SSH availability safety net)
-  - `go-euc-webfiles.service` (local API backend behind nginx)
+  - `go-euc-webfiles.service` (API backend behind nginx: reached by nginx only through the Unix socket `/opt/influx-grafana/run/api.sock`; also `127.0.0.1:18080` for local use on the appliance)
+- maintenance tools in `/usr/local/bin`:
+  - `go-euc-appliance-update.sh` (full update), `go-euc-upgrade.sh` (container refresh, optional daily timer)
+  - `go-euc-collector.sh` (infrastructure collectors)
+  - `go-euc-publish-telegraf-config.sh` (renders the Telegraf downloads)
+  - `go-euc-local-access.sh` (local-subnet allow-list for `config.txt`)
+  - `go-euc-letsencrypt-deploy-hook.sh` (applies renewed certificates to nginx)
+  - `go-euc-grafana-dashboards.py` (wraps bare Grafana v2 dashboard exports so file provisioning accepts them)
 - credential and status output (all root-only, mode 600):
   - `/opt/influx-grafana/credentials.env`
   - `/opt/influx-grafana/appliance-login.env`
@@ -38,7 +46,7 @@ The appliance is built from Ubuntu Noble cloud image and includes:
 
 ## Installation and first-boot flow
 
-1. Deploy the generated OVA in your hypervisor.
+1. Deploy the generated image in your hypervisor: the OVA for VMware, or the VHD for Hyper-V or Nutanix AHV. For AHV, use Prism → Image Configuration → Upload Image → From URL with the VHD link, then create a VM with a disk cloned from the image. Minimum 2 vCPU / 4 GB RAM; use 4 vCPU / 8 GB if collectors will run.
 2. Boot the VM and log in on the local console as `goeucadmin` / `goeucadmin`.
 3. The console wizard (`go-euc-console-wizard.sh`) prompts for:
    - hostname
@@ -75,15 +83,55 @@ The appliance is built from Ubuntu Noble cloud image and includes:
 
 Optional: you can pre-seed or manually edit `/etc/go-euc/config.env` using `appliance/firstboot/config.env.example`.
 
+## Unattended deployment (cloud-init)
+
+The console wizard only writes `/etc/go-euc/config.env` and the marker `/var/lib/go-euc/console-config.done`. The image runs cloud-init, which finishes before first boot starts, so a hypervisor's cloud-init data can do the same. First boot then provisions on its first run, without the console step or the wizard's reboot. Example user-data:
+
+```yaml
+#cloud-config
+users:
+  - name: goeucadmin
+    shell: /bin/bash
+    groups: [sudo]
+    lock_passwd: false
+    ssh_authorized_keys: ["ssh-ed25519 AAAA... you@example"]   # optional
+write_files:
+  - path: /etc/go-euc/config.env
+    permissions: "0600"
+    content: |
+      APPLIANCE_NAME=goeuc-appliance
+      APPLIANCE_STATIC_IP_CIDR=192.168.10.50/24
+      APPLIANCE_GATEWAY=192.168.10.1
+      APPLIANCE_DNS=192.168.10.1
+      APPLIANCE_LOGIN_PASSWORD='<new goeucadmin password>'
+  - path: /var/lib/go-euc/console-config.done
+    permissions: "0600"
+    content: "cloud-init\n"
+```
+
+On Nutanix AHV, pass this as the VM's guest customization (cloud-init); on VMware, use a cloud-init datasource such as guestinfo. `testing/nutanix/deploy.py` deploys to AHV this way. Cloud-init data can stay readable on the VM (for example on AHV's config drive), so change the password afterwards if that matters in your environment.
+
 ## Service endpoints after provisioning
 
 - Appliance landing page: `https://<appliance-ip>/`
 - Portainer: `https://<appliance-ip>/portainer/`
-- InfluxDB: `https://<appliance-ip>/influx/`
+- InfluxDB UI and API: `https://<appliance-ip>:8086/`, served over TLS by nginx. InfluxDB's web UI can't run under a sub-path.
+- InfluxDB API for clients: `https://<appliance-ip>/influx`. nginx strips the `/influx` prefix; this is the URL in the Telegraf downloads and the Proxmox Metric Server "API Path Prefix".
 - Grafana: `https://<appliance-ip>/grafana/`
 - GO-EUC Web: `https://<appliance-ip>/goeucweb/`
 - Portainer direct access remains available: `https://<appliance-ip>:9443`. Portainer is the tool for managing the appliance's containers, including the collectors.
-- InfluxDB (`8086`) and Grafana (`3000`) are bound to localhost on the appliance; use the HTTPS paths above.
+- The InfluxDB container isn't published on the host (nginx serves `:8086` with TLS), and Grafana (`3000`) is bound to localhost; use the HTTPS addresses above.
+
+## Landing page
+
+`https://<appliance-ip>/` (login: `goeucadmin`) ties the appliance together in one page:
+
+- **Services**: Grafana, InfluxDB, Portainer, GO-EUC Web and `config.txt`
+- **Infrastructure collectors**: one card each for VMware vSphere, Nutanix Prism Element and Proxmox VE (see [Infrastructure collectors](#infrastructure-collectors-vsphere-nutanix-proxmox-ve))
+- **Telegraf for Windows**: downloads, the install guide, and **Fetch latest Telegraf package**
+- **Maintenance**: **Run Full Appliance Update**
+- **Certificates**: Let's Encrypt setup and **Renew Let's Encrypt Certificate**
+- **Activity**: the output of every action on the page
 
 ## Telegraf download over appliance web UI (HTTPS)
 
@@ -108,22 +156,32 @@ Dockerized nginx serves `/opt/influx-grafana/public/` behind HTTP basic auth (th
 - write-only Influx token for the `Performance` bucket
 - `insecure_skip_verify` (`true` with the self-signed certificate, `false` with Let's Encrypt)
 
-The default web page (`https://<appliance-ip>/`) includes a **Fetch latest Telegraf Windows package** button that triggers an on-demand refresh API (`POST /api/refresh-telegraf`) and repopulates `/telegraf/`.
+**Fetch latest Telegraf package** (`POST /api/refresh-telegraf`) downloads the latest Telegraf Windows x64 release into `/telegraf/`.
 
-The same page also includes **Run Full Appliance Update** (`POST /api/full-update`) which performs:
+## Updates and maintenance
+
+**Run Full Appliance Update** (`POST /api/full-update`) performs:
 
 - Ubuntu package update/upgrade on the VM
 - migration of legacy compose files to include nginx reverse proxy + GO-EUC web services when missing
 - container image refresh/redeploy of the pinned image versions (`influxdb`, `grafana`, `portainer`, `goeuc/webserver`) and every enabled infrastructure collector
 - dashboard bundle refresh from the dashboard URL baked in at build time (`/etc/go-euc/dashboard-url`, overridable with `DASHBOARDS_ZIP_URL` in `config.env`)
 - Telegraf package/executable refresh and config re-publish in `/telegraf/`
+- re-run of the local-subnet allow-list for `config.txt`
 
-Container images are pinned in `scripts/step1_install_base.sh` (and `PORTAINER_IMAGE` in `appliance/maintenance/go-euc-upgrade.sh`). Bump them deliberately: Grafana and Portainer data cannot be safely downgraded.
+Container images are pinned:
 
-The landing page is organised into sections: **Services** (Grafana, InfluxDB, Portainer, GO-EUC Web, config.txt), **Infrastructure collectors** (see [Infrastructure collectors](#infrastructure-collectors-vsphere-nutanix-proxmox-ve)), **Telegraf for Windows**, **Maintenance**, **Certificates** and an **Activity** panel showing the output of every action.
+| Image | Pinned in |
+|-------|-----------|
+| `influxdb:2.7`, `grafana/grafana:13.3`, `goeuc/webserver:2004.01`, `nginx:1.27-alpine`, `portainer/portainer-ce:2.45.4` | `scripts/step1_install_base.sh` |
+| `portainer/portainer-ce:2.45.4` | `appliance/maintenance/go-euc-upgrade.sh` (`PORTAINER_IMAGE`) |
+| `telegraf:1.40` (collectors) | `appliance/maintenance/go-euc-collector.sh` (`TELEGRAF_IMAGE`) |
 
-It also includes **Renew Let's Encrypt Certificate** (`POST /api/renew-letsencrypt`) when Let's Encrypt settings are configured.
-It also includes a **Let's Encrypt Setup** web form that accepts domain/email, writes them to appliance config, and immediately attempts certificate request + apply (`POST /api/configure-letsencrypt`).
+Bump them deliberately: Grafana and Portainer data can't be downgraded safely.
+
+Optional daily container refresh: set `AUTO_UPGRADE_ENABLED=true` in `/etc/go-euc/config.env` before first boot to enable `go-euc-upgrade.timer`. It pulls the pinned images, recreates the stack and refreshes enabled collectors. It doesn't upgrade Ubuntu packages; use **Run Full Appliance Update** for that.
+
+The landing page's Certificates section has the **Let's Encrypt Setup** form (`POST /api/configure-letsencrypt`) and **Renew Let's Encrypt Certificate** (`POST /api/renew-letsencrypt`). See [TLS certificates](#tls-certificates).
 
 ## Infrastructure collectors (vSphere, Nutanix, Proxmox VE)
 
@@ -242,3 +300,7 @@ Optional build environment variables:
 - `BREAK_GLASS_USER` / `BREAK_GLASS_PASSWORD`: build-time recovery account (random password by default; rotated per VM on first boot)
 - `DASHBOARDS_ZIP_URL`: dashboard bundle location used by the appliance's full update
 - `DISK_SIZE_GB`, `VHD_SUBFORMAT`, `UBUNTU_IMAGE_URL`
+
+## Testing
+
+`testing/` contains the end-to-end test. It deploys a CI-built image to Nutanix AHV unattended, waits for provisioning, then runs on-box, HTTP, collector, console-wizard and maintenance checks. It also lists the manual checks and records past test runs. See [testing/README.md](testing/README.md).

@@ -21,6 +21,10 @@ FULL_UPDATE_CMD = ["/usr/local/bin/go-euc-appliance-update.sh"]
 LE_RENEW_CMD = ["/usr/local/bin/go-euc-renew-letsencrypt.sh"]
 PORT = 18080
 BIND_HOST = "127.0.0.1"
+# nginx (in its container) reaches the API only through this Unix socket; the directory is
+# bind-mounted into the nginx container at /run/go-euc. Group 101 = nginx workers in the image.
+SOCKET_PATH = "/opt/influx-grafana/run/api.sock"
+NGINX_GID = 101
 
 
 def _load_text(path):
@@ -559,7 +563,35 @@ class ReuseTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     daemon_threads = True
 
 
+class UnixHandler(GoEucHandler):
+    # Unix-socket peers have no (host, port) address; the client IP comes from nginx instead.
+    def address_string(self):
+        return self.headers.get("X-Real-IP", "nginx") if hasattr(self, "headers") else "nginx"
+
+
+class ThreadingUnixServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+    daemon_threads = True
+
+    def get_request(self):
+        request, _ = super().get_request()
+        return request, ("unix", 0)
+
+
 def main():
+    import threading
+
+    # Replace a stale socket from a previous run, keeping the directory (and so the
+    # nginx container's bind mount of it) in place.
+    os.makedirs(os.path.dirname(SOCKET_PATH), exist_ok=True)
+    os.chmod(os.path.dirname(SOCKET_PATH), 0o755)
+    if os.path.exists(SOCKET_PATH):
+        os.unlink(SOCKET_PATH)
+    unix_server = ThreadingUnixServer(SOCKET_PATH, UnixHandler)
+    os.chown(SOCKET_PATH, 0, NGINX_GID)
+    os.chmod(SOCKET_PATH, 0o660)
+    threading.Thread(target=unix_server.serve_forever, daemon=True).start()
+
+    # Local access on the appliance itself (e.g. curl http://127.0.0.1:18080/config.txt).
     with ReuseTCPServer((BIND_HOST, PORT), GoEucHandler) as httpd:
         httpd.serve_forever()
 

@@ -10,7 +10,7 @@
   api_token = "${COLLECTOR_USERNAME}=${COLLECTOR_PASSWORD}"
   node_name = "@@NODE@@"
   additional_vmstats_tags = ["vmid", "status"]
-  insecure_skip_verify = ${COLLECTOR_INSECURE_SKIP_VERIFY}
+  insecure_skip_verify = @@INSECURE_SKIP_VERIFY@@
   response_timeout = "15s"
 
 # Node status: CPU, iowait, load averages, memory, swap, root filesystem, KSM, uptime, CPU info.
@@ -20,7 +20,7 @@
   headers = { Authorization = "PVEAPIToken=${COLLECTOR_USERNAME}=${COLLECTOR_PASSWORD}" }
   interval = "10s"
   timeout = "15s"
-  insecure_skip_verify = ${COLLECTOR_INSECURE_SKIP_VERIFY}
+  insecure_skip_verify = @@INSECURE_SKIP_VERIFY@@
   data_format = "json_v2"
 
   [inputs.http.tags]
@@ -181,7 +181,7 @@
   headers = { Authorization = "PVEAPIToken=${COLLECTOR_USERNAME}=${COLLECTOR_PASSWORD}" }
   interval = "60s"
   timeout = "30s"
-  insecure_skip_verify = ${COLLECTOR_INSECURE_SKIP_VERIFY}
+  insecure_skip_verify = @@INSECURE_SKIP_VERIFY@@
   data_format = "json_v2"
 
   [inputs.http.tags]

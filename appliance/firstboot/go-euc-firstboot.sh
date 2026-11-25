@@ -316,7 +316,7 @@ GO-EUC Web
   URL:      https://${host_ip}/goeucweb/
 
 InfluxDB
-  URL:      https://${host_ip}/influx/
+  URL:      https://${host_ip}:8086/  (API also at https://${host_ip}/influx)
   Username: ${saved_influx_user}
   Password: ${saved_influx_password}
   Org:      ${saved_influx_org}
@@ -364,11 +364,13 @@ RelativeInflux=/influx/
 RelativePortainer=/portainer/
 RelativeGoeucWeb=/goeucweb/
 GrafanaURL=https://${host_ip}/grafana/
-InfluxURL=https://${host_ip}/influx/
+InfluxURL=https://${host_ip}:8086/
+InfluxApiURL=https://${host_ip}/influx
 PortainerURL=https://${host_ip}/portainer/
 GoeucWebURL=https://${host_ip}/goeucweb/
 PortainerDirectURL=https://${host_ip}:9443
 PortainerPort=9443
+InfluxPort=8086
 GoeucWebContainerPort=80
 
 Appliance Login
@@ -787,6 +789,33 @@ EOF
   chmod 755 "${NGINX_CERT_SETUP_SCRIPT}"
 
   cat > "${NGINX_CONF_DIR}/default.conf" <<'EOF'
+# InfluxDB UI and API on InfluxDB's usual port, over TLS. Its web UI only works at the root
+# of a host:port (it loads /<hash>.js and calls /api/v2), so it cannot live under /influx/.
+server {
+  listen 8086 ssl;
+  listen [::]:8086 ssl;
+  server_name _;
+
+  ssl_certificate /etc/nginx/certs/cert.pem;
+  ssl_certificate_key /etc/nginx/certs/key.pem;
+  ssl_protocols TLSv1.2 TLSv1.3;
+  ssl_ciphers HIGH:!aNULL:!MD5;
+  # Telegraf batches and Proxmox Metric Server pushes (default max body 25 MB).
+  client_max_body_size 32m;
+
+  location / {
+    proxy_pass http://influxdb:8086;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_read_timeout 300s;
+  }
+}
+
 server {
   listen 80;
   listen [::]:80;
@@ -828,19 +857,26 @@ server {
     proxy_set_header Connection "upgrade";
   }
 
+  # InfluxDB API under /influx (Telegraf clients, Proxmox Metric Server "API Path Prefix").
+  # InfluxDB has no base-path option, so the prefix is stripped here (trailing slash on
+  # proxy_pass). The web UI is on https://<appliance>:8086/ instead.
   location /influx/ {
     # Telegraf batches and Proxmox Metric Server pushes (default max body 25 MB) exceed nginx's 1 MB default.
     client_max_body_size 32m;
-    proxy_pass http://influxdb:8086/influx/;
+    proxy_pass http://influxdb:8086/;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto https;
-    proxy_set_header X-Forwarded-Prefix /influx;
   }
 
+  # Portainer's --base-url only changes the links it generates; it still serves from its root,
+  # so the /portainer prefix is stripped here. WebSocket headers are needed for container consoles.
   location /portainer/ {
-    proxy_pass https://portainer:9443/portainer/;
+    proxy_pass https://portainer:9443/;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -866,7 +902,9 @@ server {
     # Full appliance updates can run for a long time; don't cut the browser off at 60s.
     proxy_read_timeout 7200s;
     proxy_send_timeout 7200s;
-    proxy_pass http://host.docker.internal:18080/api/;
+    # The API backend (go-euc-webfiles.py) has no login of its own: nginx reaches it only through
+    # a Unix socket shared with this container, never over the network.
+    proxy_pass http://unix:/run/go-euc/api.sock:/api/;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -963,9 +1001,9 @@ EOF
           <p>Dashboards for test runs and realtime performance.</p>
           <span class="go">Open &rarr;</span>
         </a>
-        <a class="card tile" href="/influx/">
+        <a class="card tile" id="influxTile" href="/influx/">
           <h3>InfluxDB</h3>
-          <p>Time-series database (Performance and Tests buckets).</p>
+          <p>Time-series database (Performance, Tests and Proxmox buckets), on port 8086.</p>
           <span class="go">Open &rarr;</span>
         </a>
         <a class="card tile" href="/portainer/">
@@ -1110,6 +1148,8 @@ pveum acl modify / -role PVEAuditor -token 'telegraf@pve!monitoring'</pre>
   <script>
     const status = document.getElementById('status');
     const output = document.getElementById('output');
+    // InfluxDB's UI runs on its own port (it cannot be served under /influx/).
+    document.getElementById('influxTile').href = `https://${location.hostname}:8086/`;
     const activity = document.getElementById('activity');
 
     function setBusyState(disabled) {

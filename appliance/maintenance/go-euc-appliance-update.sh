@@ -101,6 +101,11 @@ for dashboard in "${DASHBOARDS_DIR}"/**/*.json; do
 done
 shopt -u globstar nullglob
 
+# Wrap bare Grafana v2 dashboard specs so file provisioning accepts them.
+if [[ -x /usr/local/bin/go-euc-grafana-dashboards.py ]]; then
+  /usr/local/bin/go-euc-grafana-dashboards.py "${DASHBOARDS_DIR}" || echo "[full-update] WARN: dashboard normalisation failed."
+fi
+
 if [[ -f "${STACK_FILE}" ]]; then
   echo "[full-update] Restarting Grafana to reload dashboards..."
   docker compose -f "${STACK_FILE}" restart grafana || true

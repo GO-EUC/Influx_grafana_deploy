@@ -45,6 +45,8 @@ NGINX_CONF_DIR="${INSTALL_ROOT}/nginx/conf.d"
 NGINX_CERT_DIR="${INSTALL_ROOT}/nginx/certs"
 NGINX_ACME_WEBROOT="${INSTALL_ROOT}/nginx/acme"
 NGINX_AUTH_DIR="${INSTALL_ROOT}/nginx/auth"
+# Unix socket directory shared by the API backend (go-euc-webfiles.py) and the nginx container.
+API_SOCKET_DIR="${INSTALL_ROOT}/run"
 DASHBOARD_URL_CONFIG_FILE="/etc/go-euc/dashboard-url"
 DEFAULT_DASHBOARDS_ZIP_URL="https://goeucartifacts4hiu9i.blob.core.windows.net/files/Dashboards.zip"
 
@@ -127,6 +129,20 @@ GRAFANA_DATASOURCE_STATUS="unknown"
 GOEUCWEB_STATUS="not-started"
 TELEGRAF_TOKEN_STATUS="not-created"
 PROXMOX_TOKEN_STATUS="not-created"
+
+# Wait until InfluxDB's API answers (influx ping checks /health inside the container).
+wait_for_influx() {
+  local retries="${1:-90}"
+  local sleep_seconds="${2:-2}"
+  local _i
+  for _i in $(seq 1 "${retries}"); do
+    if docker exec influxdb influx ping >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep "${sleep_seconds}"
+  done
+  return 1
+}
 
 # Poll an HTTP endpoint until an expected status code is returned.
 wait_for_http() {
@@ -286,6 +302,10 @@ download_dashboards_zip() {
         -e 's/{DS_GO}/DS_GO/g' \
         "${dashboard}" || true
     done
+    # Wrap bare Grafana v2 dashboard specs so file provisioning accepts them (appliance tool).
+    if [[ -x /usr/local/bin/go-euc-grafana-dashboards.py ]]; then
+      /usr/local/bin/go-euc-grafana-dashboards.py "${STACK_DIR}/grafana/dashboards" || true
+    fi
     DASHBOARD_IMPORT_STATUS="import-ready"
   else
     DASHBOARD_IMPORT_STATUS="no-json-found"
@@ -472,7 +492,7 @@ mkdir -p "${STACK_DIR}"/{grafana,influxdb}
 mkdir -p "${STACK_DIR}/grafana/data" "${STACK_DIR}/influxdb/data" "${STACK_DIR}/influxdb/config"
 mkdir -p "${STACK_DIR}/grafana/provisioning/datasources"
 mkdir -p "${STACK_DIR}/grafana/provisioning/dashboards" "${STACK_DIR}/grafana/dashboards"
-mkdir -p "${NGINX_CONF_DIR}" "${NGINX_CERT_DIR}" "${NGINX_ACME_WEBROOT}" "${NGINX_AUTH_DIR}"
+mkdir -p "${NGINX_CONF_DIR}" "${NGINX_CERT_DIR}" "${NGINX_ACME_WEBROOT}" "${NGINX_AUTH_DIR}" "${API_SOCKET_DIR}"
 chown -R 472:472 "${STACK_DIR}/grafana/data" || true
 
 # Grafana datasource provisioning file (InfluxDB/Flux).
@@ -521,15 +541,14 @@ else
 fi
 
 # Docker Compose definition for InfluxDB and Grafana services.
-# InfluxDB/Grafana ports are bound to localhost only; remote access goes through nginx HTTPS.
+# InfluxDB is not published on the host: nginx serves it over TLS on :8086 (UI + API) and under
+# /influx/ (API). Grafana is bound to localhost; remote access goes through nginx HTTPS.
 cat > "${STACK_DIR}/docker-compose.yml" <<YAML
 services:
   influxdb:
     image: ${INFLUXDB_IMAGE}
     container_name: influxdb
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:8086:8086"
     volumes:
       - ./influxdb/data:/var/lib/influxdb2
       - ./influxdb/config:/etc/influxdb2
@@ -540,7 +559,6 @@ services:
       DOCKER_INFLUXDB_INIT_ORG: "${INFLUX_ADMIN_ORG}"
       DOCKER_INFLUXDB_INIT_BUCKET: "${INFLUX_INIT_BUCKET}"
       DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: "${INFLUX_ADMIN_TOKEN}"
-      INFLUXD_HTTP_BASE_PATH: "/influx"
     networks:
       - monitoring_net
 
@@ -578,14 +596,14 @@ services:
     ports:
       - "80:80"
       - "443:443"
+      - "8086:8086"
     volumes:
       - ${INSTALL_ROOT}/public:/usr/share/nginx/html:ro
       - ${NGINX_CONF_DIR}/default.conf:/etc/nginx/conf.d/default.conf:ro
       - ${NGINX_CERT_DIR}:/etc/nginx/certs:ro
       - ${NGINX_ACME_WEBROOT}:/var/www/acme:rw
       - ${NGINX_AUTH_DIR}:/etc/nginx/auth:ro
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - ${API_SOCKET_DIR}:/run/go-euc
     networks:
       - monitoring_net
     depends_on:
@@ -615,7 +633,7 @@ for _ in 1 2 3; do
 done
 
 echo "==> Waiting for InfluxDB and Grafana readiness"
-if wait_for_http "http://localhost:8086/influx/health" "200" 90 2 || wait_for_http "http://localhost:8086/health" "200" 90 2; then
+if wait_for_influx 90 2; then
   INFLUX_STATUS="ready"
   # Ensure required business buckets exist every run.
   echo "==> Ensuring required Influx buckets exist"
@@ -644,7 +662,7 @@ echo
 echo "Install complete."
 echo "- Web UI (HTTPS): https://<vm-ip>/"
 echo "- Grafana: https://<vm-ip>/grafana/"
-echo "- InfluxDB: https://<vm-ip>/influx/"
+echo "- InfluxDB: https://<vm-ip>:8086/ (API also at https://<vm-ip>/influx)"
 echo "- Portainer: https://<vm-ip>/portainer/"
 echo "- GO-EUC Web: https://<vm-ip>/goeucweb/"
 echo "  - status:   ${GOEUCWEB_STATUS}"
@@ -652,7 +670,7 @@ echo "- Portainer direct: https://<vm-ip>:9443 (InfluxDB/Grafana direct ports ar
 echo "  - username: ${PORTAINER_ADMIN_USER}"
 echo "  - password: ${PORTAINER_PASSWORD_DISPLAY}"
 echo "  - status:   ${PORTAINER_CREDS_STATUS}"
-echo "- InfluxDB: https://<vm-ip>/influx/"
+echo "- InfluxDB: https://<vm-ip>:8086/ (API also at https://<vm-ip>/influx)"
 echo "  - username: ${INFLUX_ADMIN_USER}"
 echo "  - password: ${INFLUX_ADMIN_PASSWORD}"
 echo "  - org:      ${INFLUX_ADMIN_ORG}"

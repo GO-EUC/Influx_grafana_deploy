@@ -92,8 +92,10 @@ set_enabled() {
 }
 
 # Write the docker --env-file read by the container. docker reads env-file values literally
-# (no quoting or $ expansion). Telegraf substitutes ${VAR} references textually into the TOML
-# config, so string values are TOML-escaped here (quotes, backslashes, control characters).
+# (no quoting or $ expansion), and Telegraf (strict environment handling, the default since
+# 1.38) inserts them verbatim into the quoted strings that reference them. So values are
+# written raw: escaping them would put literal backslashes into passwords. Booleans are not
+# substituted by Telegraf outside quotes; render_config writes those into the config instead.
 write_runtime_env() {
   local influx_org=""
   local influx_token=""
@@ -114,29 +116,25 @@ write_runtime_env() {
   GOEUC_URL="${COLLECTOR_URL}" \
   GOEUC_USERNAME="${COLLECTOR_USERNAME}" \
   GOEUC_PASSWORD="${COLLECTOR_PASSWORD}" \
-  GOEUC_INSECURE="${COLLECTOR_INSECURE_SKIP_VERIFY}" \
   GOEUC_INFLUX_ORG="${influx_org}" \
   GOEUC_INFLUX_TOKEN="${influx_token}" \
   python3 - "${RUNTIME_ENV_FILE}" <<'PY'
-import json
 import os
 import sys
 
-
-def toml_escape(value):
-    # A JSON string body is a valid TOML basic-string body (\" \\ \uXXXX escapes).
-    return json.dumps(value)[1:-1]
-
-
 env = os.environ
-lines = [
-    f"COLLECTOR_URL={toml_escape(env['GOEUC_URL'])}",
-    f"COLLECTOR_USERNAME={toml_escape(env['GOEUC_USERNAME'])}",
-    f"COLLECTOR_PASSWORD={toml_escape(env['GOEUC_PASSWORD'])}",
-    f"COLLECTOR_INSECURE_SKIP_VERIFY={'false' if env['GOEUC_INSECURE'] == 'false' else 'true'}",
-    f"INFLUX_ORG={toml_escape(env['GOEUC_INFLUX_ORG'])}",
-    f"INFLUX_TOKEN={toml_escape(env['GOEUC_INFLUX_TOKEN'])}",
-]
+values = {
+    "COLLECTOR_URL": env["GOEUC_URL"],
+    "COLLECTOR_USERNAME": env["GOEUC_USERNAME"],
+    "COLLECTOR_PASSWORD": env["GOEUC_PASSWORD"],
+    "INFLUX_ORG": env["GOEUC_INFLUX_ORG"],
+    "INFLUX_TOKEN": env["GOEUC_INFLUX_TOKEN"],
+}
+for key, value in values.items():
+    # docker env-files are line-based: a newline or other control character cannot be represented.
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
+        sys.exit(f"{key} contains a control character; it cannot be passed to the collector.")
+lines = [f"{key}={value}" for key, value in values.items()]
 path = sys.argv[1]
 fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
 with os.fdopen(fd, "w", encoding="utf-8") as fh:
@@ -188,32 +186,43 @@ print("\n".join(nodes))
 PY
 }
 
-# Proxmox: base config + one per-node section for every discovered node.
-render_proxmox_config() {
+# Render the collector's config into RENDERED_DIR: fill in @@INSECURE_SKIP_VERIFY@@ (a boolean,
+# which Telegraf will not substitute from the environment) and, for Proxmox, repeat the per-node
+# section for every discovered node. The result holds no secrets.
+render_config() {
   local nodes=""
-  local rendered="${RENDERED_DIR}/telegraf-proxmox.conf"
+  local rendered="${RENDERED_DIR}/telegraf-${COLLECTOR_TYPE}.conf"
+  local part="${CONFIG_DIR}/telegraf-${COLLECTOR_TYPE}-node.conf.part"
 
-  log "Discovering Proxmox nodes..."
-  if ! nodes="$(discover_proxmox_nodes)"; then
-    log "ERROR: node discovery failed (see message above)." >&2
-    exit 1
+  if [[ "${COLLECTOR_TYPE}" == "proxmox" ]]; then
+    log "Discovering Proxmox nodes..."
+    if ! nodes="$(discover_proxmox_nodes)"; then
+      log "ERROR: node discovery failed (see message above)." >&2
+      exit 1
+    fi
+    log "Nodes: $(tr '\n' ' ' <<<"${nodes}")"
   fi
-  log "Nodes: $(tr '\n' ' ' <<<"${nodes}")"
 
   mkdir -p "${RENDERED_DIR}"
-  GOEUC_NODES="${nodes}" python3 - "${CONFIG_DIR}/telegraf-proxmox.conf" "${CONFIG_DIR}/telegraf-proxmox-node.conf.part" "${rendered}.tmp" <<'PY'
+  GOEUC_NODES="${nodes}" GOEUC_INSECURE="${COLLECTOR_INSECURE_SKIP_VERIFY}" \
+    python3 - "${TELEGRAF_CONFIG}" "${part}" "${rendered}.tmp" <<'PY'
 import os
 import sys
 
 base_path, part_path, out_path = sys.argv[1:4]
-base = open(base_path, encoding="utf-8").read()
-part = open(part_path, encoding="utf-8").read()
-nodes = [n for n in os.environ["GOEUC_NODES"].split("\n") if n]
+text = open(base_path, encoding="utf-8").read()
 marker = "# @@PER_NODE_INPUTS@@"
-if base.count(marker) != 1:
-    sys.exit(f"{base_path}: expected exactly one '{marker}' line")
+if marker in text:
+    nodes = [n for n in os.environ["GOEUC_NODES"].split("\n") if n]
+    part = open(part_path, encoding="utf-8").read()
+    if text.count(marker) != 1 or not nodes:
+        sys.exit(f"{base_path}: expected one '{marker}' line and at least one node")
+    text = text.replace(marker, "".join(part.replace("@@NODE@@", node) for node in nodes))
+text = text.replace("@@INSECURE_SKIP_VERIFY@@", "false" if os.environ["GOEUC_INSECURE"] == "false" else "true")
+if "@@" in text:
+    sys.exit(f"{base_path}: unrendered placeholder left in config")
 with open(out_path, "w", encoding="utf-8") as fh:
-    fh.write(base.replace(marker, "".join(part.replace("@@NODE@@", node) for node in nodes)))
+    fh.write(text)
 PY
   chmod 644 "${rendered}.tmp"
   mv -f "${rendered}.tmp" "${rendered}"
@@ -240,9 +249,7 @@ cmd_apply() {
     exit 1
   fi
   write_runtime_env
-  if [[ "${COLLECTOR_TYPE}" == "proxmox" ]]; then
-    render_proxmox_config
-  fi
+  render_config
 
   log "Pulling ${TELEGRAF_IMAGE}..."
   if ! docker pull "${TELEGRAF_IMAGE}" >/dev/null; then

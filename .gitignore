@@ -10,3 +10,14 @@ terraform/outputs-*.json
 dist/
 .DS_Store
 DS_Store
+
+# Test settings/secrets (keep them in ~/.goeuc-test, never in the repo)
+.goeuc-test/
+testing/**/*.env
+!testing/**/*.env.example
+testing/**/id_goeuc_test*
+testing/**/*.password
+__pycache__/
+# curl config files can hold credentials (-K)
+*.cfg
+!**/*.example.cfg
