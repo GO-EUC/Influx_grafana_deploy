@@ -67,6 +67,21 @@ docker exec goeuc-nginx nginx -t >/dev/null 2>&1 && ok "nginx -t" || bad "nginx 
 check "go-euc-webfiles.service active" systemctl is-active go-euc-webfiles.service
 systemctl is-enabled go-euc-upgrade.timer >/dev/null 2>&1 && info "upgrade timer enabled" || ok "upgrade timer disabled by default (AUTO_UPGRADE_ENABLED unset)"
 
+echo "===== Portainer"
+[[ "$(curl -sk -o /dev/null -w '%{http_code}' https://localhost:9443/api/users/admin/check)" == 204 ]] && ok "Portainer admin account exists" || bad "Portainer has no admin account (it locks itself after ~5 minutes)"
+pl="$(python3 -c 'import json,sys; print(json.dumps({"Username": sys.argv[1], "Password": sys.argv[2]}))' "${SAVED_PORTAINER_ADMIN_USER}" "${SAVED_PORTAINER_ADMIN_PASSWORD}" | curl -sk -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -X POST https://localhost:9443/api/auth --data-binary @-)"
+[[ "${pl}" == 200 ]] && ok "Portainer login with saved credentials" || bad "Portainer login -> ${pl}"
+grep -q 'status:   init-failed' /var/log/go-euc-install.log && bad "install log: Portainer init-failed" || ok "install log: Portainer admin initialised"
+
+echo "===== go-euc-status"
+if command -v go-euc-status >/dev/null 2>&1; then
+  st="$(go-euc-status 2>&1)"
+  n="$(grep -c 'PROBLEM' <<<"${st}")"
+  [[ "${n}" == 0 ]] && ok "go-euc-status reports no problems" || bad "go-euc-status reports ${n} problem(s): $(grep PROBLEM <<<"${st}" | head -3 | tr -s ' ' | tr '\n' ';')"
+else
+  bad "go-euc-status command missing"
+fi
+
 echo "===== InfluxDB buckets and token scopes"
 for b in Performance Tests Proxmox; do
   docker exec influxdb influx bucket find --name "$b" --org "${SAVED_INFLUX_ADMIN_ORG}" --token "${SAVED_INFLUX_ADMIN_TOKEN}" >/dev/null 2>&1 && ok "bucket ${b}" || bad "bucket ${b} missing"

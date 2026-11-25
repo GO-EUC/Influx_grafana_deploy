@@ -447,25 +447,52 @@ for _ in $(seq 1 60); do
   sleep 2
 done
 
-if [[ "${PORTAINER_READY}" -eq 1 ]]; then
-  PORTAINER_INIT_CODE="000"
-  PORTAINER_INIT_CODE="$(
-    curl -sk \
-      -o /tmp/portainer-init.json \
-      -w '%{http_code}' \
-      -H "Content-Type: application/json" \
-      -X POST "https://localhost:9443/api/users/admin/init" \
-      -d "{\"Username\":\"${PORTAINER_ADMIN_USER}\",\"Password\":\"${PORTAINER_ADMIN_PASSWORD}\"}"
-  )"
-  if [[ "${PORTAINER_INIT_CODE}" != "200" && "${PORTAINER_INIT_CODE}" != "409" && "${PORTAINER_INIT_CODE}" != "422" ]]; then
-    PORTAINER_INIT_CODE="$(
-      curl -sk \
-        -o /tmp/portainer-init.json \
-        -w '%{http_code}' \
+# Portainer >= 2.45 only allows the first admin to be created with the one-time setup token it
+# prints in its log ("setup_token=..."), and locks itself if no admin exists ~5 minutes after start.
+portainer_setup_token() {
+  docker logs portainer 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -oE 'setup_token=[A-Za-z0-9._-]+' | tail -1 | cut -d= -f2
+}
+
+portainer_admin_exists() {
+  # 204 = an admin user exists, 404 = not yet.
+  [[ "$(curl -sk -o /dev/null -w '%{http_code}' "https://localhost:9443/api/users/admin/check")" == "204" ]]
+}
+
+portainer_init_admin() {
+  local token="" body_file="" code="000" _i
+  body_file="$(mktemp)"
+  chmod 600 "${body_file}"
+  python3 -c 'import json, sys; print(json.dumps({"Username": sys.argv[1], "Password": sys.argv[2]}))' \
+    "${PORTAINER_ADMIN_USER}" "${PORTAINER_ADMIN_PASSWORD}" > "${body_file}"
+  for _i in $(seq 1 15); do
+    token="$(portainer_setup_token)"
+    code="$(
+      curl -sk -o /tmp/portainer-init.json -w '%{http_code}' \
         -H "Content-Type: application/json" \
-        -X POST "https://localhost:9443/portainer/api/users/admin/init" \
-        -d "{\"Username\":\"${PORTAINER_ADMIN_USER}\",\"Password\":\"${PORTAINER_ADMIN_PASSWORD}\"}"
+        ${token:+-H "X-Setup-Token: ${token}"} \
+        -X POST "https://localhost:9443/api/users/admin/init" \
+        --data-binary "@${body_file}"
     )"
+    [[ "${code}" == "200" || "${code}" == "409" ]] && break
+    sleep 4
+  done
+  rm -f "${body_file}" /tmp/portainer-init.json
+  printf '%s' "${code}"
+}
+
+if [[ "${PORTAINER_READY}" -eq 1 ]]; then
+  if portainer_admin_exists; then
+    PORTAINER_INIT_CODE="409"
+  else
+    PORTAINER_INIT_CODE="$(portainer_init_admin)"
+    if [[ "${PORTAINER_INIT_CODE}" != "200" ]] && ! portainer_admin_exists; then
+      # Possibly locked by its 5-minute security timeout: a restart re-opens the setup window
+      # (and prints a new setup token).
+      echo "==> Portainer admin init returned ${PORTAINER_INIT_CODE}; restarting Portainer and retrying"
+      docker restart portainer >/dev/null 2>&1 || true
+      sleep 10
+      PORTAINER_INIT_CODE="$(portainer_init_admin)"
+    fi
   fi
 
   case "${PORTAINER_INIT_CODE}" in

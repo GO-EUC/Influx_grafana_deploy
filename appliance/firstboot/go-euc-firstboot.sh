@@ -90,10 +90,8 @@ Current network:
   gateway: ${RUNTIME_GATEWAY}
   dns: ${RUNTIME_DNS}
 
-First-boot troubleshooting:
-  sudo systemctl status go-euc-firstboot.service
-  sudo journalctl -u go-euc-firstboot.service -n 200 --no-pager
-  sudo tail -n 200 ${LOG_FILE}
+Troubleshooting (appliance status, containers, recent errors, log locations):
+  sudo go-euc-status
 EOF
   chmod 644 "${LOGIN_BANNER_FILE}" || true
 }
@@ -562,6 +560,54 @@ EOF
   netplan apply
 }
 
+# Outbound access needed by first boot (Ubuntu packages, Docker install, container images).
+# Optional sites only produce a warning: the bundled dashboards are used on first boot and the
+# Telegraf package can be fetched later from the landing page.
+REQUIRED_SITES=(
+  "http://archive.ubuntu.com/ubuntu/"
+  "http://security.ubuntu.com/ubuntu/"
+  "https://download.docker.com/linux/ubuntu/gpg"
+  "https://registry-1.docker.io/v2/"
+  "https://auth.docker.io/token"
+)
+OPTIONAL_SITES=(
+  "https://api.github.com/repos/influxdata/telegraf/releases/latest"
+)
+
+# Fail fast with a clear console message when the appliance has no internet access, instead
+# of failing partway through the Docker installation. Retries for up to ~2 minutes while the
+# network settles. Any HTTP answer (even 401/404) counts as reachable.
+check_internet_access() {
+  local site=""
+  local code=""
+  local failed=()
+  local attempt
+
+  for attempt in $(seq 1 12); do
+    failed=()
+    for site in "${REQUIRED_SITES[@]}"; do
+      code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "${site}" 2>/dev/null || true)"
+      [[ "${code}" =~ ^[1-5][0-9][0-9]$ ]] || failed+=("${site%%/*}//$(cut -d/ -f3 <<<"${site}")")
+    done
+    [[ "${#failed[@]}" -eq 0 ]] && break
+    echo "[firstboot] Internet check attempt ${attempt}: unreachable: ${failed[*]}"
+    sleep 10
+  done
+
+  if [[ "${#failed[@]}" -gt 0 ]]; then
+    get_runtime_network_details
+    write_issue_status "FAILED" "No internet access: cannot reach ${failed[*]}. First boot needs outbound HTTP/HTTPS (Ubuntu mirrors, Docker). Check gateway ${RUNTIME_GATEWAY}, DNS ${RUNTIME_DNS} and firewall/proxy rules, then reboot to retry (setup resumes automatically)."
+    echo "[firstboot] ERROR: no internet access (${failed[*]}); stopping before installation."
+    exit 1
+  fi
+  echo "[firstboot] Internet check passed."
+
+  for site in "${OPTIONAL_SITES[@]}"; do
+    code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "${site}" 2>/dev/null || true)"
+    [[ "${code}" =~ ^[1-5][0-9][0-9]$ ]] || echo "[firstboot] WARN: optional site unreachable: ${site} (Telegraf package download will fail until it is reachable)."
+  done
+}
+
 # Optional local override file (used by console-first setup).
 if [[ -f "${CONFIG_FILE}" ]]; then
   # shellcheck source=/dev/null
@@ -582,7 +628,11 @@ if [[ ! -f "${CONSOLE_CONFIG_MARKER}" ]]; then
 fi
 
 write_issue_status "INITIALIZING" "Monitoring services setup is running. This can take 10-20 minutes."
+# Network first: the package installs below need the configured (static) address.
+apply_hostname_config
+apply_network_config
 bootstrap_dhcp_network
+check_internet_access
 ensure_firstboot_prereqs
 configure_ssh_access
 
@@ -1371,8 +1421,6 @@ EOF
   "${TELEGRAF_REFRESH_SCRIPT}" || true
 }
 
-apply_hostname_config
-apply_network_config
 configure_upgrade_timer
 configure_web_file_host
 
@@ -1385,6 +1433,15 @@ fi
 if [[ ! -x "${INSTALLER}" ]]; then
   chmod +x "${INSTALLER}"
 fi
+
+# Service overrides from config.env (see config.env.example) are plain shell variables here;
+# export the ones that are set so the installer (a separate process) actually receives them.
+for override in PORTAINER_ADMIN_USER PORTAINER_ADMIN_PASSWORD INFLUX_ADMIN_USER INFLUX_ADMIN_PASSWORD \
+  INFLUX_ADMIN_ORG INFLUX_INIT_BUCKET GRAFANA_ADMIN_USER GRAFANA_ADMIN_PASSWORD; do
+  if [[ -n "${!override:-}" ]]; then
+    export "${override?}"
+  fi
+done
 
 # The install log contains generated credentials: keep it root-only.
 install -m 600 /dev/null "${LOG_FILE}"

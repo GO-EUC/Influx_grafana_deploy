@@ -10,6 +10,11 @@ Inputs (never printed):
   $GOEUC_TEST_DIR/goeucadmin.password appliance login password (generated if missing)
 GOEUC_TEST_DIR defaults to ~/.goeuc-test.
 
+Optional (test scenarios):
+  GOEUC_DEPLOY_DNS            override APPLIANCE_DNS (e.g. an unreachable resolver to test the
+                              first-boot internet check)
+  GOEUC_DEPLOY_EXTRA_CONFIG   extra lines appended to config.env (e.g. INFLUX_ADMIN_ORG=GO)
+
 usage: python3 deploy.py <vhd-url> <vm-name> <ahv-network-name> [vcpus] [memory_mb]
 """
 import base64
@@ -136,10 +141,9 @@ config_env = "\n".join([
     f"APPLIANCE_NAME={shlex.quote(hostname)}",
     f"APPLIANCE_STATIC_IP_CIDR={shlex.quote(ENV['APPLIANCE_IP_CIDR'])}",
     f"APPLIANCE_GATEWAY={shlex.quote(ENV['APPLIANCE_GATEWAY'])}",
-    f"APPLIANCE_DNS={shlex.quote(ENV['APPLIANCE_DNS'])}",
+    f"APPLIANCE_DNS={shlex.quote(os.environ.get('GOEUC_DEPLOY_DNS') or ENV['APPLIANCE_DNS'])}",
     f"APPLIANCE_LOGIN_PASSWORD={shlex.quote(password)}",
-    "",
-])
+] + [line for line in os.environ.get("GOEUC_DEPLOY_EXTRA_CONFIG", "").splitlines() if line.strip()] + [""])
 userdata = "#cloud-config\n" + json.dumps({
     "users": [{
         "name": "goeucadmin",
