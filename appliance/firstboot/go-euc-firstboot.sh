@@ -1037,6 +1037,11 @@ server {
 }
 EOF
 
+  # GO-EUC branding (logo, favicon) for the landing page.
+  mkdir -p "${PUBLIC_DIR}/assets"
+  cp -f /opt/go-euc-installer/web/assets/* "${PUBLIC_DIR}/assets/" 2>/dev/null || true
+  chmod 755 "${PUBLIC_DIR}/assets"; chmod 644 "${PUBLIC_DIR}/assets/"* 2>/dev/null || true
+
   cat > "${PUBLIC_INDEX_FILE}" <<'EOF'
 <!doctype html>
 <html lang="en">
@@ -1044,59 +1049,115 @@ EOF
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>GO-EUC Appliance</title>
+  <link rel="icon" type="image/x-icon" sizes="32x32" href="/assets/favicon.ico">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&display=swap" rel="stylesheet">
   <style>
-    :root { --border: #d0d7de; --muted: #57606a; --bg: #f6f8fa; --accent: #0969da; --text: #1f2328; }
+    /* GO-EUC website look (go-euc.com): dark background, lime accent, Inter. */
+    :root {
+      --bg: #0f0e15; --bg-deep: #09080f; --panel: #17151e; --accent: #b8ec4e; --accent-hover: #c4f066;
+      --text: #eee; --muted: #aaa; --line: rgba(255,255,255,.1); --danger: #ff8182;
+      --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif;
+    }
     * { box-sizing: border-box; }
-    body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; margin: 0; background: var(--bg); color: var(--text); line-height: 1.45; }
-    header { background: #fff; border-bottom: 1px solid var(--border); padding: 1rem 2rem; }
-    header h1 { margin: 0; font-size: 1.5rem; }
-    header p { margin: 0.2rem 0 0.6rem; color: var(--muted); }
-    nav a { color: var(--accent); text-decoration: none; margin-right: 1rem; font-size: 0.95rem; }
-    nav a:hover { text-decoration: underline; }
-    main { max-width: 1200px; margin: 0 auto; padding: 0.5rem 2rem 3rem; }
-    section { margin-top: 1.75rem; scroll-margin-top: 1rem; }
-    section > h2 { font-size: 1.15rem; margin: 0 0 0.2rem; }
-    section > p.lead { color: var(--muted); margin: 0 0 0.75rem; max-width: 900px; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 1rem; }
+    body { font-family: var(--font); font-size: 16px; line-height: 1.6; margin: 0; background: var(--bg); color: var(--text);
+           -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+    a { color: var(--text); text-decoration: none; transition: all .2s; }
+    a:hover { color: var(--accent); }
+    p a, .hint a, td a { border-bottom: 2px solid rgba(184,236,78,.45); }
+    p a:hover, .hint a:hover { border-color: var(--accent); color: var(--text); }
+    code { font-size: .88em; padding: .1em .35em; border-radius: 4px; background: rgba(255,255,255,.08); color: #f5f5f5; }
+
+    .top { background: linear-gradient(180deg, var(--bg-deep) 0%, var(--bg) 100%); }
+    header { color: #fff; }
+    .header__inner { max-width: 1340px; margin: 0 auto; padding: 40px 20px 0; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+    .logo { display: flex; align-items: center; gap: 14px; }
+    .logo img { max-height: 40px; display: block; }
+    .logo span { font-size: 12px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--muted);
+                 padding: 4px 10px; border: 2px solid rgba(255,255,255,.2); border-radius: 24px; }
+    nav a { font-size: 12px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; margin-left: 40px; }
+    nav a:first-child { margin-left: 0; }
+    .hero { max-width: 1340px; margin: 0 auto; padding: 72px 20px 40px; }
+    .hero h1 { font-size: 48px; line-height: 1.05; font-weight: 900; letter-spacing: -1.5px; color: #fff; margin: 0 0 12px; }
+    .hero p { font-size: 18px; color: var(--muted); margin: 0; max-width: 760px; }
+
+    main { max-width: 1340px; margin: 0 auto; padding: 0 20px 48px; }
+    main > section:first-child { margin-top: 16px; }
+    section { margin-top: 56px; scroll-margin-top: 1rem; }
+    section > h2 { position: relative; display: inline-block; padding-left: 8px; margin: 0 0 24px; font-size: 24px; line-height: 1; font-weight: 900; letter-spacing: -0.5px; color: #fff; z-index: 0; }
+    section > h2::after { content: ""; position: absolute; left: 0; top: 50%; z-index: -1; transform: translateY(-50%); width: 106px; height: 38px;
+                          border-radius: 4px 0 0 4px; background: linear-gradient(90deg, #b8ec4e -5.19%, rgba(15,14,21,0) 100%); }
+    section > p.lead { color: var(--muted); margin: -8px 0 20px; max-width: 900px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 24px; }
     .grid.wide { grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); }
-    .card { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 1rem; }
-    .card h3 { margin: 0 0 0.35rem; font-size: 1.05rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
-    .card p { margin: 0.25rem 0; }
-    a.tile { display: block; text-decoration: none; color: inherit; }
-    a.tile:hover { border-color: var(--accent); }
-    a.tile .go { color: var(--accent); font-weight: 600; }
-    label { display: block; font-weight: 600; margin: 0.55rem 0 0.2rem; }
-    label.check { font-weight: normal; display: flex; gap: 0.45rem; align-items: center; }
-    input[type=text], input[type=email], input[type=password] { width: 100%; padding: 0.45rem 0.55rem; font-size: 1rem; border: 1px solid var(--border); border-radius: 6px; }
-    button { padding: 0.5rem 0.9rem; font-size: 0.95rem; cursor: pointer; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); margin: 0.6rem 0.4rem 0 0; }
-    button.primary { background: #1f883d; color: #fff; border-color: #1a7f37; }
-    button:disabled { opacity: 0.6; cursor: wait; }
-    .hint { color: var(--muted); font-size: 0.9rem; margin-top: 0.5rem; }
-    .badge { font-size: 0.78rem; font-weight: 600; padding: 0.1rem 0.55rem; border-radius: 999px; border: 1px solid var(--border); background: var(--bg); color: var(--muted); }
-    .badge.ok { background: #dafbe1; border-color: #4ac26b; color: #116329; }
-    .badge.err { background: #ffebe9; border-color: #ff8182; color: #a40e26; }
-    pre { background: #0d1117; color: #e6edf3; padding: 1rem; border-radius: 8px; white-space: pre-wrap; max-height: 460px; overflow: auto; margin: 0.5rem 0 0; }
-    pre.cmd { background: var(--bg); color: var(--text); border: 1px solid var(--border); font-size: 0.82rem; padding: 0.6rem; word-break: break-all; }
-    details { margin-top: 0.9rem; border-top: 1px solid var(--border); padding-top: 0.6rem; }
-    summary { cursor: pointer; font-weight: 600; }
-    table.kv { border-collapse: collapse; font-size: 0.88rem; margin-top: 0.4rem; width: 100%; }
-    table.kv td { border-top: 1px solid var(--border); padding: 0.25rem 0.4rem; vertical-align: top; word-break: break-all; }
+    .card { background: var(--panel); border-radius: 16px; padding: 24px; box-shadow: 0 5px 10px 0 rgba(0,0,0,.5); }
+    .card h3 { margin: 0 0 8px; font-size: 20px; line-height: 1.2; font-weight: 900; letter-spacing: -0.5px; color: #fff; display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+    .card p { margin: .35rem 0; color: #ddd; }
+    a.tile { display: block; color: inherit; border: 2px solid transparent; transition: transform .2s ease, border-color .2s ease; }
+    a.tile:hover { transform: translateY(-5px); border-color: var(--accent); color: inherit; }
+    a.tile p { color: var(--muted); font-size: 14px; }
+    a.tile .go { display: inline-block; margin-top: 10px; color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
+
+    label { display: block; font-weight: 700; font-size: 14px; margin: 14px 0 6px; color: #fff; }
+    label.check { font-weight: 500; display: flex; gap: .55rem; align-items: center; color: var(--text); }
+    input[type=radio], input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; }
+    input[type=text], input[type=email], input[type=password] { width: 100%; padding: 14px 16px; font-family: var(--font); font-size: 15px; font-weight: 500;
+      color: var(--text); background: var(--bg-deep); border: 2px solid transparent; border-radius: 8px; outline: none; transition: border-color .2s ease-in-out; }
+    input::placeholder { color: #777; }
+    input:focus { border-color: var(--accent); }
+    button { font-family: var(--font); padding: 14px 24px; font-size: 14px; font-weight: 700; line-height: 1; cursor: pointer; border: none; border-radius: 8px;
+             color: #fff; background: var(--bg-deep); margin: 16px 8px 0 0; transition: all .2s; }
+    button:hover { color: var(--bg-deep); background: var(--accent); }
+    button.primary { color: var(--bg-deep); background: var(--accent); }
+    button.primary:hover { background: var(--accent-hover); }
+    button:disabled { opacity: .5; cursor: wait; }
+    .hint { color: var(--muted); font-size: 13px; line-height: 1.5; margin-top: 12px; }
+    .badge { font-size: 12px; line-height: 1; font-weight: 700; padding: 5px 10px; border-radius: 24px; border: 2px solid rgba(255,255,255,.2); color: var(--muted); }
+    .badge.ok { border-color: var(--accent); color: var(--accent); }
+    .badge.err { border-color: var(--danger); color: var(--danger); }
+    pre { background: var(--bg-deep); color: #e6edf3; padding: 20px; border-radius: 16px; white-space: pre-wrap; max-height: 460px; overflow: auto; margin: 12px 0 0; font-size: 13px; }
+    pre.cmd { font-size: 12px; padding: 12px; border-radius: 8px; word-break: break-all; }
+    details { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 12px; }
+    summary { cursor: pointer; font-weight: 700; color: #fff; }
+    summary:hover { color: var(--accent); }
+    table.kv { border-collapse: collapse; font-size: 13px; margin-top: 8px; width: 100%; }
+    table.kv td { border-top: 1px solid var(--line); padding: 6px 8px; vertical-align: top; word-break: break-all; }
     table.kv td:first-child { color: var(--muted); white-space: nowrap; width: 1%; }
+    #status { color: var(--text); font-weight: 500; }
+    footer { border-top: 2px solid var(--bg-deep); margin-top: 64px; }
+    footer .footer__inner { max-width: 1340px; margin: 0 auto; padding: 32px 20px; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+                            color: var(--muted); font-size: 13px; }
+    @media (max-width: 760px) {
+      nav a { margin: 0 16px 0 0; }
+      .hero h1 { font-size: 32px; }
+      .grid.wide { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
+  <div class="top">
   <header>
+    <div class="header__inner">
+      <a class="logo" href="/" title="GO-EUC Appliance">
+        <img src="/assets/goeuc-logo-white.png" alt="GO-EUC">
+        <span>Appliance</span>
+      </a>
+      <nav>
+        <a href="#services">Services</a>
+        <a href="#collectors">Collectors</a>
+        <a href="#telegraf">Telegraf</a>
+        <a href="#maintenance">Maintenance</a>
+        <a href="#certificates">Certificates</a>
+        <a href="#activity">Activity</a>
+      </nav>
+    </div>
+  </header>
+  <div class="hero">
     <h1>GO-EUC Appliance</h1>
     <p>Performance monitoring for EUC testing: InfluxDB, Grafana and Telegraf collectors.</p>
-    <nav>
-      <a href="#services">Services</a>
-      <a href="#collectors">Infrastructure collectors</a>
-      <a href="#telegraf">Telegraf for Windows</a>
-      <a href="#maintenance">Maintenance</a>
-      <a href="#certificates">Certificates</a>
-      <a href="#activity">Activity</a>
-    </nav>
-  </header>
+  </div>
+  </div>
   <main>
     <section id="services">
       <h2>Services</h2>
@@ -1485,6 +1546,12 @@ pveum acl modify / -role PVEAuditor -token 'telegraf@pve!monitoring'</pre>
       loadCollector(card);
     });
   </script>
+  <footer>
+    <div class="footer__inner">
+      <span>GO-EUC Appliance</span>
+      <span><a href="https://www.go-euc.com/" target="_blank" rel="noopener">go-euc.com</a> &middot; <a href="https://github.com/GO-EUC/Influx_grafana_deploy" target="_blank" rel="noopener">GitHub</a></span>
+    </div>
+  </footer>
 </body>
 </html>
 EOF

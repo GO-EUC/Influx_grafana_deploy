@@ -142,7 +142,7 @@ On Nutanix AHV, pass this as the VM's guest customization (cloud-init); on VMwar
 
 ## Landing page
 
-`https://<appliance-ip>/` (login: `goeucadmin`) ties the appliance together in one page:
+`https://<appliance-ip>/` (login: `goeucadmin`) ties the appliance together in one page, in the GO-EUC website's look (logo and favicon from `appliance/web/assets/`; the Inter font loads from Google Fonts when the browser has internet access, with a system font otherwise):
 
 - **Services**: Grafana, InfluxDB, Portainer, GO-EUC Web and `config.txt`
 - **Infrastructure collectors**: one card each for VMware vSphere, Nutanix Prism Element and Proxmox VE (see [Infrastructure collectors](#infrastructure-collectors-vsphere-nutanix-proxmox-ve))

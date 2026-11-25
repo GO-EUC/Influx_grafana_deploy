@@ -77,9 +77,12 @@ for t in vsphere nutanix proxmox; do
 done
 expect "unknown collector type" "404" "$(code_auth "${BASE}/api/collectors/hyperv/status")"
 expect "unknown API path" "404" "$(code_auth "${BASE}/api/does-not-exist")"
+# Server: the public host name or Let's Encrypt domain when one is in use, else the address used.
+expect "GET /api/public-hostname" "200" "$(code_auth "${BASE}/api/public-hostname")"
+WANT_SERVER="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(sys.argv[2] if d["source"]=="ip" else d["base_url"].split("//",1)[1].split(":")[0])' "${BODY}" "${IP}" 2>/dev/null)"
 expect "GET /api/proxmox-metric-server" "200" "$(code_auth "${BASE}/api/proxmox-metric-server")"
-python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["bucket"]=="Proxmox" and d["api_path_prefix"]=="/influx" and d["token"] and d["server"]==sys.argv[2]' "${BODY}" "${IP}" 2>/dev/null \
-  && ok "Metric Server settings (server ${IP}, bucket Proxmox, prefix /influx, token present)" || bad "Metric Server settings: $(head -c 200 "${BODY}")"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["bucket"]=="Proxmox" and d["api_path_prefix"]=="/influx" and d["token"] and d["server"]==sys.argv[2]' "${BODY}" "${WANT_SERVER}" 2>/dev/null \
+  && ok "Metric Server settings (server ${WANT_SERVER}, bucket Proxmox, prefix /influx, token present)" || bad "Metric Server settings: $(head -c 200 "${BODY}")"
 post_json() { code_auth -X POST -H 'Content-Type: application/json' --data-binary "$2" "${BASE}$1"; }
 expect "Let's Encrypt: shell injection in email rejected" "400" "$(post_json /api/configure-letsencrypt '{"domain":"appliance.example.com","email":"a@b.c;id"}')"
 expect "Let's Encrypt: invalid domain rejected" "400" "$(post_json /api/configure-letsencrypt '{"domain":"not a domain","email":"admin@example.com"}')"
