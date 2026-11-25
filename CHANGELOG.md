@@ -53,6 +53,7 @@
 - **`go-euc-migrate <old-ip>`**: switch to a new appliance with one command on the new appliance. It copies every InfluxDB bucket over the API (into the new org, keeping the new tokens) and hand-made Grafana dashboards; the old appliance is only read. Guide: `docs/switching-appliances.md`.
 - **`go-euc-change-ip`**: change the static IP after setup (e.g. take over the old appliance's address); refreshes the `config.txt` subnet list, the Telegraf downloads and the banner.
 - **`go-euc-backup.sh` / `go-euc-restore.sh`**: file-based backup and restore of InfluxDB data, collector settings, carry-over settings and optionally Grafana's database.
+- **Releases on demand**: pushes to `main` no longer create a release automatically. Run the build workflow on `main` with **Create release** and choose a **major** or **minor** version. The release lists that build's OVA/VHD links with SHA-256 checksums, links to the guides and changelog at that version, and the generated change list.
 - **End-to-end test suite** in `testing/`: unattended Nutanix AHV deployment plus on-box, HTTP, collector, wizard and maintenance checks.
 
 ### Documentation

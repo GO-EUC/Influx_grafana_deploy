@@ -20,11 +20,11 @@ Maintainer documentation: how the appliance image is built, released and tested.
 
 Workflow file: `.github/workflows/build-appliance.yml`
 
-Triggers:
-
-- push to `dev`: build appliance + upload images to Azure Blob storage
-- push to `main`: build appliance + upload images to Azure Blob storage + publish `Dashboards.zip` to the `files` container + auto-create the next GitHub Release (`v1.0`, `v1.1`, `v1.2`, ...)
-- manual run: `workflow_dispatch`
+| Trigger | What happens |
+|---|---|
+| Push to `dev` | Build the appliance and upload the images to Azure Blob storage. The run's summary page lists the download links and checksums. |
+| Push to `main` | Same, plus publish `Dashboards.zip` to the `files` container (appliances download it during **Run Full Appliance Update**). **No release.** |
+| Manual run (*Run workflow*) | Build and upload for the chosen branch. With **Create release** ticked (on `main` only), also create a GitHub Release. See [Releasing](#releasing). |
 
 Images uploaded to the Azure Blob container (`vars.AZURE_STORAGE_CONTAINER`):
 
@@ -33,6 +33,48 @@ Images uploaded to the Azure Blob container (`vars.AZURE_STORAGE_CONTAINER`):
 - matching `.sha256` for each image format
 
 The images are too large for GitHub Release assets, so each GitHub Release body contains download links to the Azure Blob files. The Azure prerequisites (storage account, containers, GitHub OIDC identity) are created by the Terraform in `terraform/`.
+
+## Releasing
+
+Releases are created only when you decide, never automatically.
+
+### Versions
+
+| Release type | When | Example |
+|---|---|---|
+| **major** | New functionality, or anything users need to act on (new appliance, changed URLs) | `v1.0` → `v2.0` |
+| **minor** | Fixes and small improvements | `v2.0` → `v2.1` |
+
+The next version is worked out from the latest `vX.Y` tag. An existing version is never overwritten: the run stops before building if the tag already exists.
+
+### Steps
+
+1. **Get the code onto `main`.** Open a pull request from `dev` to `main`, review it and merge it. Before merging:
+   - Run the end-to-end test on the `dev` build and record it in `testing/README.md`.
+   - In `CHANGELOG.md`, rename `## Unreleased (dev)` to the version you're about to release, e.g. `## v2.0 (2026-11-26)`.
+   - Make sure `Dashboards.zip` contains every dashboard appliances should have. The `main` build publishes it, and existing appliances download it during their next full update.
+2. **Create the release.** GitHub → *Actions* → *Build Virtual Appliance* → *Run workflow*:
+   - **Use workflow from:** `main`
+   - **Create a GitHub Release:** ticked
+   - **Version bump:** `major` or `minor`
+   - **Release notes:** optional; a short summary shown above the generated sections
+
+   Or from a terminal:
+   ```bash
+   gh workflow run build-appliance.yml --ref main \
+     -f create_release=true -f release_type=major \
+     -f release_notes="Infrastructure collectors, one-command appliance switching and security hardening."
+   ```
+3. **Check the release** (about 5 minutes later) on the repository's *Releases* page. It contains:
+   - your notes
+   - a download table for **that run's** OVA and VHD, with SHA-256 checksums and checksum files
+   - links to the getting-started guide, the switching guide and the changelog at that version
+   - a comparison link to the previous release
+   - GitHub's generated list of merged pull requests
+
+   The release is tagged on the exact commit that was built and marked as *Latest*.
+
+If the run fails before the build with *"Releases can only be created from main"*, you started it on another branch. If it fails with *"Tag vX.Y already exists"*, that version is already released; choose the other release type or fix the tags first.
 
 ## Local build (optional)
 

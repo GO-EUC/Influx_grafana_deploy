@@ -1,26 +1,91 @@
 name: Build Virtual Appliance
 
+# Pushes to dev and main build the appliance and upload the images (main also publishes the
+# dashboard bundle). GitHub Releases are only created when you ask for one: run this workflow
+# by hand on main (Actions > Build Virtual Appliance > Run workflow) with "Create release"
+# ticked. See docs/development.md, "Releasing".
+
 on:
   push:
     branches:
       - dev
       - main
   workflow_dispatch:
+    inputs:
+      create_release:
+        description: "Create a GitHub Release with this build's download links (main branch only)"
+        type: boolean
+        default: false
+      release_type:
+        description: "Version bump: major (new functionality, v1.4 -> v2.0) or minor (fixes, v2.0 -> v2.1)"
+        type: choice
+        options:
+          - minor
+          - major
+        default: minor
+      release_notes:
+        description: "Optional text for the top of the release notes (a list of changes is added automatically)"
+        type: string
+        required: false
 
 permissions:
   contents: write
   id-token: write
 
+# Never run two builds of the same branch at once (two releases could pick the same version).
+concurrency:
+  group: build-appliance-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
     environment: appliance-build
+    env:
+      RELEASE_REQUESTED: ${{ github.event_name == 'workflow_dispatch' && inputs.create_release }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      # Release checks run first so a bad request fails in seconds, not after the build.
+      - name: Check release request
+        if: env.RELEASE_REQUESTED == 'true'
+        run: |
+          if [[ "${GITHUB_REF_NAME}" != "main" ]]; then
+            echo "::error::Releases can only be created from main (this run is on '${GITHUB_REF_NAME}'). Merge into main, then run the workflow on main with 'Create release' ticked."
+            exit 1
+          fi
+
+      - name: Work out release version
+        if: env.RELEASE_REQUESTED == 'true'
+        id: version
+        env:
+          RELEASE_TYPE: ${{ inputs.release_type }}
+        run: |
+          git fetch --tags --force
+          LATEST_TAG="$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+$' | sort -V | tail -n1 || true)"
+          if [[ -z "${LATEST_TAG}" ]]; then
+            NEXT_TAG="v1.0"
+          else
+            VERSION_NO_V="${LATEST_TAG#v}"
+            MAJOR="${VERSION_NO_V%%.*}"
+            MINOR="${VERSION_NO_V##*.}"
+            if [[ "${RELEASE_TYPE}" == "major" ]]; then
+              NEXT_TAG="v$((MAJOR + 1)).0"
+            else
+              NEXT_TAG="v${MAJOR}.$((MINOR + 1))"
+            fi
+          fi
+          if git rev-parse -q --verify "refs/tags/${NEXT_TAG}" >/dev/null; then
+            echo "::error::Tag ${NEXT_TAG} already exists; refusing to overwrite a release."
+            exit 1
+          fi
+          echo "Release ${NEXT_TAG} (${RELEASE_TYPE}; previous: ${LATEST_TAG:-none})"
+          echo "release_tag=${NEXT_TAG}" >> "${GITHUB_OUTPUT}"
+          echo "previous_tag=${LATEST_TAG}" >> "${GITHUB_OUTPUT}"
 
       - name: Install build dependencies
         run: |
@@ -51,11 +116,13 @@ jobs:
           echo "ova_checksum_file=${OVA_CHECKSUM_FILE}" >> "${GITHUB_OUTPUT}"
           echo "ova_name=$(basename "${OVA_FILE}")" >> "${GITHUB_OUTPUT}"
           echo "ova_checksum_name=$(basename "${OVA_CHECKSUM_FILE}")" >> "${GITHUB_OUTPUT}"
+          echo "ova_sha256=$(cut -d' ' -f1 "${OVA_CHECKSUM_FILE}")" >> "${GITHUB_OUTPUT}"
 
           echo "vhd_file=${VHD_FILE}" >> "${GITHUB_OUTPUT}"
           echo "vhd_checksum_file=${VHD_CHECKSUM_FILE}" >> "${GITHUB_OUTPUT}"
           echo "vhd_name=$(basename "${VHD_FILE}")" >> "${GITHUB_OUTPUT}"
           echo "vhd_checksum_name=$(basename "${VHD_CHECKSUM_FILE}")" >> "${GITHUB_OUTPUT}"
+          echo "vhd_sha256=$(cut -d' ' -f1 "${VHD_CHECKSUM_FILE}")" >> "${GITHUB_OUTPUT}"
 
       - name: Azure Login (OIDC)
         if: github.ref_name == 'dev' || github.ref_name == 'main'
@@ -113,53 +180,64 @@ jobs:
             --auth-mode login \
             --overwrite true
 
-      - name: Print Azure Blob download URLs
+      - name: Show download URLs
         if: github.ref_name == 'dev' || github.ref_name == 'main'
+        env:
+          BASE: https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}
         run: |
-          echo "Appliance images uploaded to Azure Blob:"
-          echo "OVA:"
-          echo "https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}/${{ steps.files.outputs.ova_name }}"
-          echo "https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}/${{ steps.files.outputs.ova_checksum_name }}"
-          echo "VHD:"
-          echo "https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}/${{ steps.files.outputs.vhd_name }}"
-          echo "https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}/${{ steps.files.outputs.vhd_checksum_name }}"
+          {
+            echo "### Appliance images"
+            echo ""
+            echo "| Image | Download | SHA-256 |"
+            echo "|---|---|---|"
+            echo "| OVA | ${BASE}/${{ steps.files.outputs.ova_name }} | \`${{ steps.files.outputs.ova_sha256 }}\` |"
+            echo "| VHD | ${BASE}/${{ steps.files.outputs.vhd_name }} | \`${{ steps.files.outputs.vhd_sha256 }}\` |"
+          } | tee -a "${GITHUB_STEP_SUMMARY}"
 
-      - name: Compute GitHub release version
-        if: github.ref_name == 'main'
-        id: version
+      - name: Write release notes
+        if: env.RELEASE_REQUESTED == 'true'
+        env:
+          # Passed through the environment, never pasted into the script (script injection).
+          RELEASE_NOTES_INPUT: ${{ inputs.release_notes }}
+          TAG: ${{ steps.version.outputs.release_tag }}
+          PREVIOUS: ${{ steps.version.outputs.previous_tag }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          BASE: https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}
+          OVA_NAME: ${{ steps.files.outputs.ova_name }}
+          OVA_SHA: ${{ steps.files.outputs.ova_sha256 }}
+          VHD_NAME: ${{ steps.files.outputs.vhd_name }}
+          VHD_SHA: ${{ steps.files.outputs.vhd_sha256 }}
         run: |
-          git fetch --tags --force
-          LATEST_TAG="$(
-            git tag -l 'v*' \
-              | awk '/^v[0-9]+\.[0-9]+$/ { print }' \
-              | sort -V \
-              | tail -n1
-          )"
+          {
+            if [[ -n "${RELEASE_NOTES_INPUT}" ]]; then
+              printf '%s\n\n' "${RELEASE_NOTES_INPUT}"
+            fi
+            echo "## Download"
+            echo ""
+            echo "| Image | Use it for | Download | SHA-256 |"
+            echo "|---|---|---|---|"
+            echo "| OVA | VMware vSphere / ESXi | [${OVA_NAME}](${BASE}/${OVA_NAME}) ([checksum](${BASE}/${OVA_NAME}.sha256)) | \`${OVA_SHA}\` |"
+            echo "| VHD | Hyper-V, Nutanix AHV, Proxmox VE / KVM | [${VHD_NAME}](${BASE}/${VHD_NAME}) ([checksum](${BASE}/${VHD_NAME}.sha256)) | \`${VHD_SHA}\` |"
+            echo ""
+            echo "## Getting started"
+            echo ""
+            echo "- **New to the appliance:** [Getting started](${REPO_URL}/blob/${TAG}/docs/getting-started.md): requirements, import on each hypervisor, setup, first login."
+            echo "- **Upgrading from an earlier release:** deploy this release as a new appliance, then run \`sudo go-euc-migrate <old-appliance-ip>\` on it. See [Switching appliances](${REPO_URL}/blob/${TAG}/docs/switching-appliances.md)."
+            echo "- **What's new:** [CHANGELOG](${REPO_URL}/blob/${TAG}/CHANGELOG.md)."
+            if [[ -n "${PREVIOUS}" ]]; then
+              echo "- **All changes since ${PREVIOUS}:** [compare](${REPO_URL}/compare/${PREVIOUS}...${TAG})."
+            fi
+          } > release-notes.md
+          cat release-notes.md
 
-          if [ -z "${LATEST_TAG}" ]; then
-            NEXT_TAG="v1.0"
-          else
-            VERSION_NO_V="${LATEST_TAG#v}"
-            MAJOR="${VERSION_NO_V%%.*}"
-            MINOR="${VERSION_NO_V##*.}"
-            NEXT_TAG="v${MAJOR}.$((MINOR + 1))"
-          fi
-
-          echo "release_tag=${NEXT_TAG}" >> "${GITHUB_OUTPUT}"
-
-      - name: Publish GitHub Release (Azure links only)
-        if: github.ref_name == 'main'
+      - name: Publish GitHub Release
+        if: env.RELEASE_REQUESTED == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.release_tag }}
-          name: ${{ steps.version.outputs.release_tag }}
+          name: GO-EUC Appliance ${{ steps.version.outputs.release_tag }}
           target_commitish: ${{ github.sha }}
-          body: |
-            New to the appliance? Start with the getting-started guide: https://github.com/GO-EUC/Influx_grafana_deploy/blob/main/docs/getting-started.md
-            Upgrading? Deploy this release as a new appliance and move your data with go-euc-backup.sh / go-euc-restore.sh (see the guide, "Moving from an older appliance").
-
-            Download links:
-            - OVA: https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}/${{ steps.files.outputs.ova_name }}
-            - OVA checksum: https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}/${{ steps.files.outputs.ova_checksum_name }}
-            - VHD: https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}/${{ steps.files.outputs.vhd_name }}
-            - VHD checksum: https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}/${{ steps.files.outputs.vhd_checksum_name }}
+          body_path: release-notes.md
+          # Appends GitHub's generated list of merged pull requests and contributors.
+          generate_release_notes: true
+          make_latest: true
