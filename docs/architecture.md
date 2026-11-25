@@ -146,7 +146,7 @@ flowchart LR
     router -- "1. default<br/>80 -> appliance:80<br/>443 -> appliance:443" --> a1["Appliance<br/>standard ports 80 / 443"]
 
     router -- "2. 80, 443" --> proxy["Reverse proxy<br/>(e.g. nginx on Unraid,<br/>any subnet)"]
-    proxy -- "by host name:<br/>goeuc.example.com<br/>-> appliance:80 / :443" --> a2["Appliance<br/>standard ports 80 / 443"]
+    proxy -- "by host name:<br/>goeuc.example.com<br/>-> https://appliance:443" --> a2["Appliance<br/>standard ports 80 / 443"]
     proxy -- "other host names" --> other["Other services"]
 
     router -- "3. 80 -> appliance:8080<br/>443 -> appliance:4443" --> a3["Appliance<br/>alternative ports 8080 / 4443"]
@@ -155,7 +155,7 @@ flowchart LR
 | Setup | Router | Appliance web ports | Certificate |
 |---|---|---|---|
 | 1. Direct (default) | 80 → appliance:80, 443 → appliance:443 | standard 80/443 | Let's Encrypt on the appliance |
-| 2. Reverse proxy (one public IP shared with other services) | 80, 443 → proxy; proxy sends `goeuc.example.com` to appliance:80/443 | standard 80/443 | on the appliance (proxy passes `/.well-known/acme-challenge/` through) or on the proxy |
+| 2. Reverse proxy (one public IP shared with other services) | 80, 443 → proxy; proxy sends `goeuc.example.com` to `https://appliance:443` | standard 80/443 (or 4443) | on the proxy; the appliance keeps its self-signed certificate |
 | 3. Alternative ports | 80 → appliance:8080, 443 → appliance:4443 | alternative 8080/4443 | Let's Encrypt on the appliance |
 
 Never forward 22, 9443 or 8086; use a VPN for remote administration.

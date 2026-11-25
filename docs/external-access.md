@@ -49,32 +49,50 @@ On your own network, keep using `https://<appliance-ip>/` or the DNS name. If th
 
 ## Setup 2: through a reverse proxy you already run (one public IP)
 
-Use this when ports 80 and 443 on your router already go to another web server, for example nginx, Nginx Proxy Manager or SWAG on Unraid. One public IP is enough: the reverse proxy picks the destination by host name, so `goeuc.example.com` goes to the appliance and everything else keeps going where it goes today. The proxy and the appliance can be on different subnets, as long as the proxy can reach the appliance's IP on 80 and 443.
+Use this when ports 80 and 443 on your router already go to another web server, for example nginx, Nginx Proxy Manager or SWAG on Unraid. One public IP is enough: the reverse proxy picks the destination by host name, so `goeuc.example.com` goes to the appliance and everything else keeps going where it goes today. The proxy and the appliance can be on different subnets, as long as the proxy can reach the appliance's IP on 443.
 
 ```mermaid
 flowchart LR
     internet["Internet"] -- "80, 443" --> router["Router<br/>public IP"]
     router -- "80, 443" --> proxy["Reverse proxy<br/>(e.g. nginx on Unraid)"]
-    proxy -- "goeuc.example.com<br/>-> appliance:80 / :443" --> appliance["GO-EUC appliance"]
+    proxy -- "goeuc.example.com<br/>-> https://appliance:443" --> appliance["GO-EUC appliance<br/>(self-signed certificate)"]
     proxy -- "other host names" --> other["Your other services"]
 ```
 
-1. **DNS:** an A record for `goeuc.example.com` pointing at your public IP (same as setup 1).
-2. **Proxy host:** add a proxy host for `goeuc.example.com` that sends **HTTP (80) to `http://<appliance-ip>:80`** and **HTTPS (443) to `https://<appliance-ip>:443`**. Settings that matter:
-   - **Let the appliance answer `/.well-known/acme-challenge/`** on port 80, so the appliance can get its own Let's Encrypt certificate. Don't redirect port 80 to HTTPS on the proxy for this host; the appliance does that itself.
-   - **Upload size:** allow request bodies of at least **32 MB** (`client_max_body_size 32m;`). Telegraf and Proxmox write batches to `/influx/`, and the default 1 MB limit drops them.
-   - **WebSockets:** turn on WebSocket support (Nginx Proxy Manager: *Websockets Support*). Portainer's container consoles need it.
-   - **Timeouts:** the landing page's *Run Full Appliance Update* can take many minutes. Set `proxy_read_timeout 3600s;`, or run long actions from inside the lab.
-   - **Upstream certificate:** the appliance starts with a self-signed certificate. Either turn off upstream verification on the proxy, or verify once the appliance has its Let's Encrypt certificate.
-3. **Certificate on the appliance:** on the landing page, **Certificates → Let's Encrypt setup** with `goeuc.example.com`, as in setup 1. Alternatively the proxy can hold the public certificate: the appliance then keeps its self-signed one, and that only matters to clients that connect to it directly.
+With a proxy in front, **the proxy holds the public certificate**: it answers Let's Encrypt for the host name, and the appliance keeps its self-signed certificate behind it. Most proxies (Nginx Proxy Manager, SWAG, the Unraid apps) send a host name to **one IP address and port**. That's all the appliance needs.
 
-A minimal plain-nginx example (on the proxy, not the appliance):
+1. **DNS:** an A record for `goeuc.example.com` pointing at your public IP (same as setup 1).
+2. **Proxy host** for `goeuc.example.com`. The field names below are Nginx Proxy Manager's; other proxies have the same settings.
+
+   | Setting | Value |
+   |---|---|
+   | Scheme | **`https`** |
+   | Forward hostname / IP | the appliance's IP, e.g. `192.168.1.50` |
+   | Forward port | **`443`** (`4443` if the appliance uses the alternative web ports) |
+   | Websockets Support | **on** (Portainer's container consoles) |
+   | Block Common Exploits | on or off, either works |
+   | SSL tab | *Request a new SSL Certificate* (Let's Encrypt), **Force SSL** on, HTTP/2 on |
+   | Advanced tab (custom nginx configuration) | `client_max_body_size 32m;` and `proxy_read_timeout 3600s;` |
+
+   Why these values:
+   - **Scheme `https` to port 443.** The appliance only serves pages over HTTPS. Port 80 on the appliance only redirects, so a proxy pointed at `http://<appliance>:80` would loop.
+   - **The upstream certificate isn't checked.** Nginx Proxy Manager doesn't verify it by default, so the appliance's self-signed certificate is accepted.
+   - **Upload size.** Telegraf and Proxmox write batches to `/influx/` of up to 25 MB; the 1 MB default rejects them with 413.
+   - **Read timeout.** *Run Full Appliance Update* on the landing page can take many minutes.
+3. **Don't** use *Certificates → Let's Encrypt setup* on the appliance in this setup. The proxy answers Let's Encrypt's checks for the host name itself, so the appliance's request would fail.
+
+Inside the lab, keep using `https://<appliance-ip>/`. The Telegraf downloads point at the appliance's IP, which suits machines in the lab. A machine outside the lab uses `url = "https://goeuc.example.com/influx"` in its Telegraf config, and can set `insecure_skip_verify = false` because the proxy's certificate is trusted.
+
+Through the proxy, the InfluxDB web UI isn't available, because it lives on port 8086. The landing page's InfluxDB tile only works from inside the lab. The InfluxDB API works through the proxy at `/influx` and `/api/v2`.
+
+If your proxy is plain nginx, this is the same setup (on the proxy, not the appliance):
 
 ```nginx
 server {
   listen 80;
   server_name goeuc.example.com;
-  location / { proxy_pass http://192.168.1.50:80; proxy_set_header Host $host; }
+  location /.well-known/acme-challenge/ { root /var/www/certbot; }   # the proxy's own Let's Encrypt
+  location / { return 301 https://$host$request_uri; }
 }
 server {
   listen 443 ssl;
@@ -95,8 +113,6 @@ server {
   }
 }
 ```
-
-With this example the proxy holds the public certificate. If you'd rather have the appliance get it (step 3), the proxy can start from a self-signed or temporary certificate.
 
 Requests through the proxy come from the proxy's address, so `/config.txt` is refused unless the proxy is on the appliance's own subnet. That's intended: read `config.txt` from inside the lab.
 
@@ -138,11 +154,15 @@ Tools outside your network write to the appliance's InfluxDB through the web ser
 
 Give each tool a token that can only write to the buckets it needs. Create one in the InfluxDB UI (`https://<appliance-ip>:8086/` from inside the lab → *Load Data → API Tokens*). Don't hand out the admin token.
 
+To check everything at once from a client, run `testing/checks/public_checks.sh <public-name> <appliance-ip>` from the repo (see [testing/README.md](../testing/README.md)).
+
 ## Troubleshooting
 
 | Symptom | Check |
 |---|---|
-| Let's Encrypt fails with "connection refused", "timeout" or "unauthorized" | The DNS name must resolve to your public IP (`nslookup goeuc.example.com 1.1.1.1`). External port 80 must reach the appliance's HTTP port: test `http://goeuc.example.com/.well-known/acme-challenge/test` from outside, which should return the appliance's 404, not your proxy's or router's page. On a reverse proxy, don't redirect port 80 to HTTPS for this host. |
+| Let's Encrypt on the appliance fails with "connection refused", "timeout" or "unauthorized" | The DNS name must resolve to your public IP (`nslookup goeuc.example.com 1.1.1.1`). External port 80 must reach the appliance's HTTP port: test `http://goeuc.example.com/.well-known/acme-challenge/test` from outside, which should return the appliance's 404, not your router's page. Behind a reverse proxy (setup 2), let the proxy get the certificate instead. |
+| Through the proxy: "502 Bad Gateway" | The proxy host must use scheme **https** and port **443** (4443 with the alternative ports), and the proxy must reach the appliance's IP. Test from the proxy machine with `curl -k https://<appliance-ip>/grafana/`. |
+| Through the proxy: "too many redirects" | The proxy host points at `http://<appliance>:80`. Use `https` and port 443. |
 | Works inside the lab, not from outside | The router forward or the firewall rule is missing; or the ISP blocks inbound 80/443 (try setup 3 with other external ports to confirm). |
 | Works from outside, not from inside with the DNS name | The router has no NAT loopback. Use the IP inside the lab, or add an internal DNS record pointing the name at the appliance (or the proxy). |
 | Telegraf from outside: `x509: certificate is valid for ..., not ...` | Telegraf must use the DNS name, not the IP: download the config again from `/telegraf/` once Let's Encrypt is active. |

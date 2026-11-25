@@ -1,6 +1,6 @@
 # Developing and releasing the GO-EUC appliance
 
-Maintainer documentation: how the appliance image is built, released and tested. If you want to *use* the appliance, see [getting-started.md](getting-started.md).
+Maintainer documentation: how the appliance image is built, released and tested. If you want to *use* the appliance, see [getting-started.md](getting-started.md). Before changing the appliance scripts, read [lessons.md](../lessons.md).
 
 ## Repository layout
 

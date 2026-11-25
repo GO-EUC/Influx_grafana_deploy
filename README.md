@@ -20,7 +20,7 @@ This repository builds and publishes the GO-EUC virtual appliance as an OVA (VMw
 - **Reaching it from the internet:** [docs/external-access.md](docs/external-access.md): DNS, port forwarding (direct, through a reverse proxy such as nginx on Unraid, or on the alternative ports 8080/4443), Let's Encrypt.
 - **Something not working?** Run `sudo go-euc-status` on the appliance; see [Troubleshooting](docs/getting-started.md#8-troubleshooting).
 - **Moving to a new release?** Follow [docs/switching-appliances.md](docs/switching-appliances.md): deploy the new appliance, run `sudo go-euc-migrate <old-ip>` on it, switch clients over, switch the old one off.
-- **What changed:** [CHANGELOG.md](CHANGELOG.md). **Building, releasing and testing the appliance:** [docs/development.md](docs/development.md). Releases are created on demand from the workflow; see [Releasing](docs/development.md#releasing).
+- **What changed:** [CHANGELOG.md](CHANGELOG.md). **Building, releasing and testing the appliance:** [docs/development.md](docs/development.md), and [lessons.md](lessons.md) for pitfalls found along the way. Releases are created on demand from the workflow; see [Releasing](docs/development.md#releasing).
 
 The rest of this README is the reference for each feature.
 

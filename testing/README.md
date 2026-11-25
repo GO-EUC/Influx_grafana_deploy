@@ -22,6 +22,7 @@ It was written to verify the security hardening, the infrastructure collectors (
 | `checks/migrate_checks.sh` | client | Runs `go-euc-migrate <old>` on the new appliance. Checks every old point arrived (across orgs), hand-made dashboards were copied, preloaded ones weren't duplicated, the old appliance is unchanged, and a re-run is harmless. |
 | `checks/backup_restore_checks.sh` | client | Restores a `go-euc-backup.sh` archive from another appliance (`--with-grafana`). Checks every point arrived in the target's own org, collectors restored, Grafana login and data source after the DB restore, and that a second restore is harmless. |
 | `checks/maintenance_checks.sh` | client | Fetch latest Telegraf, **Run Full Appliance Update**, reboot, and every on-box check again. |
+| `checks/public_checks.sh` | client | Through the appliance's public host name (router forward or reverse proxy): certificate, logins, every service, `config.txt` and `:8086` not reachable, 20 MB upload not refused, WebSocket upgrade, and a write through the name that lands in this appliance's InfluxDB. Needs NAT loopback, or run it from outside. |
 | `checks/ports_checks.sh` | client | Switches the web ports to the alternative 8080/4443 through the landing page API, checks every route, the redirect, the old port closed, Telegraf configs, `config.txt`, `config.env`, Compose and `go-euc-status`; switches back to 80/443 with `go-euc-set-ports` and checks again. |
 
 Every check prints `PASS`, `FAIL` or `INFO`, and nothing prints passwords or tokens. Secrets are read from files and handed to `curl` through temporary config files, so they never appear on the command line.
@@ -72,6 +73,7 @@ $SSH 'sudo bash -s' < testing/checks/wizard_check.sh
 testing/checks/http_checks.sh "$IP" 403     # 403: client NOT on the appliance subnet; use 200 if it is
 testing/checks/collector_checks.sh "$IP"
 testing/checks/ports_checks.sh "$IP"          # standard -> alternative (8080/4443) -> standard
+testing/checks/public_checks.sh goeuc.example.com "$IP"   # only when a public name points at the appliance
 testing/checks/maintenance_checks.sh "$IP" "$VM"   # long: full update upgrades Ubuntu packages, then reboots
 
 # Moving data: back up a source appliance, restore it onto this one
@@ -185,3 +187,22 @@ Open items:
 - ~~Dashboard bundles differ~~: resolved for v2.0. *Troubleshooting* was added to the repo's `Dashboards.zip` (data source placeholder resolved). All 7 dashboards were verified to provision on the final build with no errors.
 - **Switching from appliances built before November 2026** (InfluxDB on `http://<old>:8086`, token in the old `config.txt`'s Telegraf section) is implemented but not yet tested on a real old appliance.
 - Not covered by this environment: the manual checks above (real console wizard, browser walkthrough, `config.txt` from the appliance subnet, Windows client, real vCenter / Proxmox VE, Proxmox Metric Server push, Let's Encrypt).
+
+### 2026-11-25 run 5: build `20261125-225247-9566c857` (commit `9566c85`): passed
+
+Web ports option, `/api/v2` route, and access through a public host name. Fresh VM #6 (`.130`). The public name pointed at a reverse proxy (Nginx Proxy Manager style: one host name to `https://<appliance>:443`, the proxy holds the Let's Encrypt certificate), on a different subnet from the appliance.
+
+| Suite | Result |
+|-------|--------|
+| `remote_checks.sh` | 90 passed, 0 failed (incl. a write through `/api/v2` on the appliance) |
+| `wizard_check.sh` | 8 passed, 0 failed |
+| `http_checks.sh` | 58 passed, 0 failed |
+| `ports_checks.sh` | 49 passed, 0 failed (standard → alternative through the landing page API → standard with `go-euc-set-ports`) |
+| `collector_checks.sh` | 18 passed, 0 failed |
+| `public_checks.sh <public-name> <ip>` | 24 passed, 0 failed (Let's Encrypt certificate on the proxy, logins, all services, `config.txt` 403, `:8086` closed, 20 MB write not refused, WebSocket reaches Portainer, writes via `/influx` and `/api/v2` land in this appliance) |
+
+Found during development, before this build: `go-euc-set-ports` didn't update `HTTPPort`, `HTTPSPort` and the Proxmox Metric Server `Port` inside `config.txt` (found with a hot-patched run-4 appliance; fixed).
+
+Open items:
+- Grafana's own URL is `http://localhost/grafana/` (`GF_SERVER_ROOT_URL` with the default domain). Navigation uses relative paths and works everywhere, but links Grafana generates (*Share → Copy link*, alert notifications) show `localhost`.
+- The landing page's InfluxDB tile links to `:8086`, which isn't reachable through a public name or reverse proxy. Expected and documented; the InfluxDB API works through `/influx` and `/api/v2`.
