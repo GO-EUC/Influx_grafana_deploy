@@ -36,6 +36,10 @@ for section in 'id="services"' 'id="collectors"' 'data-collector="vsphere"' 'dat
   grep -q "${section}" "${BODY}" && ok "landing page has ${section}" || bad "landing page missing ${section}"
 done
 expect "/telegraf/ without login" "401" "$(code "${BASE}/telegraf/")"
+expect "/telegraf/ folder with login (file listing)" "200" "$(code_auth "${BASE}/telegraf/")"
+for f in telegraf.conf telegraf_vsphere.conf telegraf_nutanix.conf telegraf_proxmox.conf telegraf.exe WINDOWS_INSTALL.html; do
+  grep -q "href=\"${f}\"" "${BODY}" && ok "/telegraf/ listing shows ${f}" || bad "/telegraf/ listing missing ${f}"
+done
 expect "/telegraf/telegraf.conf with login" "200" "$(code_auth "${BASE}/telegraf/telegraf.conf")"
 expect "/telegraf/WINDOWS_INSTALL.html with login" "200" "$(code_auth "${BASE}/telegraf/WINDOWS_INSTALL.html")"
 
