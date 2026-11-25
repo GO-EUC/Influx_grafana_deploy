@@ -22,7 +22,7 @@ The GO-EUC appliance is a ready-made Ubuntu virtual machine that collects and sh
 | vCPU | 2 | 4 |
 | Memory | 4 GB | 8 GB |
 | Disk | 100 GB thin-provisioned (included in the image; grows automatically if you enlarge it) | |
-| Boot | Legacy BIOS | |
+| Boot | Legacy BIOS (tested). The image also has an EFI partition, but UEFI boot hasn't been tested yet. | |
 
 **Network**
 - A free **static IPv4 address**, plus the subnet's gateway and a DNS server. The setup wizard asks for these.
@@ -33,8 +33,10 @@ The GO-EUC appliance is a ready-made Ubuntu virtual machine that collects and sh
   | `archive.ubuntu.com`, `security.ubuntu.com` | 80 | Ubuntu packages |
   | `download.docker.com` | 443 | Docker installation |
   | `registry-1.docker.io`, `auth.docker.io`, `production.cloudflare.docker.com` | 443 | container images |
-  | `github.com`, `api.github.com`, `objects.githubusercontent.com` | 443 | Telegraf for Windows downloads (optional) |
+  | `api.github.com`, `github.com` | 443 | finding the latest Telegraf version (optional) |
+  | `dl.influxdata.com` | 443 | Telegraf for Windows package download (optional) |
   | `goeucartifacts4hiu9i.blob.core.windows.net` | 443 | dashboard updates (optional) |
+  | `acme-v02.api.letsencrypt.org` | 443 | Let's Encrypt certificates (optional) |
 
   First boot checks the required sites before installing anything. If they aren't reachable, setup stops with a clear message instead of failing halfway (see [Troubleshooting](#8-troubleshooting)).
 
@@ -44,7 +46,7 @@ The GO-EUC appliance is a ready-made Ubuntu virtual machine that collects and sh
   |---|---|
   | 443 | Landing page, Grafana, Portainer, GO-EUC Web, and the InfluxDB API that Telegraf writes to |
   | 8086 | InfluxDB web UI and API (HTTPS) |
-  | 80 | Redirects to HTTPS; needed for Let's Encrypt |
+  | 80 | Redirects to HTTPS. For Let's Encrypt it must be reachable **from the internet** (HTTP validation). |
   | 9443 | Portainer direct (optional) |
   | 22 | SSH for administration (optional) |
 
@@ -79,26 +81,32 @@ Use the steps for your hypervisor. Only the Nutanix AHV steps have been tested e
 2. Adjust CPU and memory if needed, power on, and open the console.
 
 **Microsoft Hyper-V (not yet tested)**
-1. Create a **Generation 1** VM (the image boots BIOS, not UEFI) with 4 GB+ RAM, connected to the right virtual switch.
+1. Create a **Generation 1** VM (Generation 2 VMs can't use `.vhd` files) with 4 GB+ RAM, connected to the right virtual switch.
 2. Choose "Use an existing virtual hard disk" and select the `.vhd`.
 3. Set the processor count, start the VM, and connect to its console.
 
 **Proxmox VE / other KVM (not yet tested)**
-1. Copy the `.vhd` to the Proxmox host and create a VM without a disk (SeaBIOS, VirtIO network), for example `qm create 9000 --name go-euc --memory 8192 --cores 4 --net0 virtio,bridge=vmbr0`.
-2. Import the disk with `qm importdisk 9000 go-euc-appliance-<build>.vhd local-lvm`. Attach it as `scsi0`, make it the boot disk, then start the VM and open its console.
+1. Copy the `.vhd` to the Proxmox host, then create the VM, import the disk, attach it and make it the boot disk. Replace `9000` with a free VM ID and `local-lvm` / `vmbr0` with your storage and bridge:
+   ```bash
+   qm create 9000 --name go-euc --memory 8192 --cores 4 --net0 virtio,bridge=vmbr0 --scsihw virtio-scsi-single
+   qm importdisk 9000 go-euc-appliance-<build>.vhd local-lvm
+   qm set 9000 --scsi0 local-lvm:vm-9000-disk-0 --boot order=scsi0
+   qm start 9000
+   ```
+2. Open the VM's console in the Proxmox web interface.
 
 ## 5. First boot and the setup wizard
 
-1. On the VM console, log in as **`goeucadmin`** with password **`goeucadmin`**. The setup wizard starts by itself. If it first asks `[sudo] password for goeucadmin`, type `goeucadmin` again.
+1. Wait until the VM console's login screen shows **`GO-EUC APPLIANCE - PENDING-CONSOLE-CONFIG`** (about a minute after power-on). Then log in as **`goeucadmin`** with password **`goeucadmin`**. The setup wizard starts by itself. If it first asks `[sudo] password for goeucadmin`, type `goeucadmin` again.
 2. Answer the prompts: hostname, network interface (the default is usually right), static IP in CIDR form (e.g. `192.168.10.50/24`), gateway, DNS servers, and a **new password for `goeucadmin`** (at least 8 characters). This password is also your login for the appliance web page, so write it down.
-3. The appliance reboots and sets itself up. The console banner shows `INITIALIZING`, then `COMPLETE`. That usually takes 5–20 minutes, depending on your internet connection.
+3. The appliance reboots and sets itself up. The login screen shows `INITIALIZING`, then `COMPLETE`. That usually takes under 10 minutes; it depends mostly on your internet connection.
 
 To deploy many appliances, or skip the console entirely, see [Unattended deployment](../README.md#unattended-deployment-cloud-init).
 
 ## 6. First login
 
-1. Browse to **`https://<appliance-ip>/`**. Your browser will warn that the connection isn't private. That's expected: the appliance starts with a *self-signed* certificate. Continue anyway (*Advanced → Proceed* or similar). You can replace it with a trusted Let's Encrypt certificate later; see [Let's Encrypt](#7-next-steps).
-2. Sign in as **`goeucadmin`** with the password you chose in the wizard.
+1. Browse to **`https://<appliance-ip>/`** (the address you gave the wizard). Your browser will warn that the connection isn't private. That's expected: the appliance starts with a *self-signed* certificate. Continue anyway (*Advanced → Proceed* or similar). You can replace it with a trusted Let's Encrypt certificate later; see [Let's Encrypt](#7-next-steps).
+2. When the browser asks for a username and password, sign in as **`goeucadmin`** with the password you chose in the wizard.
 3. Find the logins for the individual services. Each appliance gets its own random passwords, in one of two places:
    - **Services → config.txt** on the landing page. It opens from a computer on the **same subnet** as the appliance; elsewhere it's refused, which is deliberate.
    - On the appliance console or over SSH: `sudo cat /opt/influx-grafana/install-summary.txt`.
@@ -115,23 +123,29 @@ To deploy many appliances, or skip the console entirely, see [Unattended deploym
 Download Telegraf and its config from **Telegraf for Windows** on the landing page, and follow [WINDOWS_INSTALL.md](../Telegraf/WINDOWS_INSTALL.md). The configs are already filled in with this appliance's address and a write-only token, and the data appears in the `Performance` bucket.
 
 **Look at the dashboards**
-In Grafana, open *Dashboards*. The GO-EUC dashboards (Windows Performance Realtime, Windows Process Realtime/Analysis/Test Runs, Analyzing, Comparing) are preloaded:
-- The realtime and process dashboards work as soon as Telegraf data arrives.
-- *Analyzing* and *Comparing* also use test-run information from the `Tests` bucket, which the GO-EUC test tooling writes.
-- The appliance's InfluxDB organisation is `monitoring`. If your test tooling expects a different organisation (the GO-EUC lab uses `GO`), set it **before completing the setup wizard**, because it can't be changed afterwards. At the wizard's first prompt, press `Ctrl+C`, then run:
+In Grafana, open *Dashboards*. Seven GO-EUC dashboards are preloaded. What they need:
 
-  ```bash
-  echo 'INFLUX_ADMIN_ORG=GO' | sudo tee -a /etc/go-euc/config.env
-  sudo go-euc-console-wizard.sh
-  ```
+| Dashboards | Data they need |
+|---|---|
+| Windows Performance Realtime, Windows Process Realtime, Troubleshooting | Telegraf data from the Windows machines (`Performance` bucket). They work as soon as data arrives. |
+| Windows Process Analysis, Windows Process Test Runs | Telegraf data plus test-run records in the `Tests` bucket, written by the GO-EUC test tooling. |
+| Analyzing, Comparing New | Telegraf data, test runs in `Tests`, and OBUX benchmark results in an **`OBUX`** bucket. |
 
-  The wizard keeps extra settings in `config.env`. The same works for the other overrides in `appliance/firstboot/config.env.example`, or put them in the [cloud-init data](../README.md#unattended-deployment-cloud-init).
+The appliance creates the `Performance` and `Tests` buckets, but **not `OBUX`**. If you use the OBUX benchmark, create it once in the InfluxDB UI (`https://<ip>:8086/` → *Load Data* → *Buckets* → *Create Bucket*, name `OBUX`), then point the benchmark's InfluxDB output at the appliance.
+**InfluxDB organisation.** The appliance's InfluxDB organisation is `monitoring`. If your test tooling expects a different organisation (the GO-EUC lab uses `GO`), set it **before completing the setup wizard**, because it can't be changed afterwards. At the wizard's first prompt, press `Ctrl+C`, then run:
+
+```bash
+echo 'INFLUX_ADMIN_ORG=GO' | sudo tee -a /etc/go-euc/config.env
+sudo go-euc-console-wizard.sh
+```
+
+The wizard keeps extra settings in `config.env`. The same works for the other overrides in `appliance/firstboot/config.env.example`, or put them in the [cloud-init data](../README.md#unattended-deployment-cloud-init).
 
 **Collect hypervisor metrics (optional)**
 Under **Infrastructure collectors** on the landing page, fill in the card for VMware vSphere, Nutanix Prism Element or Proxmox VE and click *Save and Start*. See [Infrastructure collectors](../README.md#infrastructure-collectors-vsphere-nutanix-proxmox-ve).
 
 **Trusted certificate (optional)**
-If the appliance has a public DNS name, use **Certificates → Let's Encrypt setup** on the landing page. Renewals are automatic.
+If the appliance has a public DNS name and port 80 is reachable from the internet, use **Certificates → Let's Encrypt setup** on the landing page. Renewals are automatic.
 
 **Keep it up to date**
 Use **Maintenance → Run Full Appliance Update** now and then. It updates Ubuntu, the containers, the dashboards and Telegraf.
@@ -142,7 +156,7 @@ Start with **`sudo go-euc-status`** on the appliance console or over SSH. It che
 
 | Symptom | What to do |
 |---|---|
-| Banner says `FAILED: No internet access` | The appliance couldn't reach the sites in [Requirements](#2-requirements). Check the gateway, DNS and firewall (no proxy support), fix it, then reboot. Setup carries on automatically. |
+| Banner says `FAILED: No internet access` | The appliance couldn't reach the sites in [Requirements](#2-requirements); the banner lists which. Fix the firewall or network (no proxy support) and reboot, and setup carries on automatically. If you mistyped the IP, gateway or DNS in the wizard, log in and run `sudo go-euc-console-wizard.sh` to enter them again; it reboots and setup resumes. |
 | Banner says `FAILED` with another reason | Run `sudo go-euc-status` and `sudo tail -100 /var/log/go-euc-install.log`. During setup, the banner also shows the **break-glass** account (`recovery`) for logging in if `goeucadmin` doesn't work. |
 | Web page doesn't load | Check the VM has the IP you expect (`ip a` on the console) and that port 443 is reachable from your PC. |
 | Browser certificate warning | Expected with the default self-signed certificate (see [First login](#6-first-login)). |
