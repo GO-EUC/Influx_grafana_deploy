@@ -17,6 +17,7 @@ This repository builds and publishes the GO-EUC virtual appliance as an OVA (VMw
 - **New to the appliance?** Follow [docs/getting-started.md](docs/getting-started.md): requirements, download, import on VMware, Hyper-V, Nutanix or Proxmox, setup, first login, next steps and troubleshooting.
 - **Download:** [Releases](https://github.com/GO-EUC/Influx_grafana_deploy/releases), with OVA (VMware) and VHD (Hyper-V, Nutanix AHV, Proxmox VE/KVM) links and checksums in each release.
 - **How it fits together:** [docs/architecture.md](docs/architecture.md): ports, request routing, data flow, and what to forward on a router.
+- **Reaching it from the internet:** [docs/external-access.md](docs/external-access.md): DNS, port forwarding (direct, through a reverse proxy such as nginx on Unraid, or on the alternative ports 8080/4443), Let's Encrypt.
 - **Something not working?** Run `sudo go-euc-status` on the appliance; see [Troubleshooting](docs/getting-started.md#8-troubleshooting).
 - **Moving to a new release?** Follow [docs/switching-appliances.md](docs/switching-appliances.md): deploy the new appliance, run `sudo go-euc-migrate <old-ip>` on it, switch clients over, switch the old one off.
 - **What changed:** [CHANGELOG.md](CHANGELOG.md). **Building, releasing and testing the appliance:** [docs/development.md](docs/development.md). Releases are created on demand from the workflow; see [Releasing](docs/development.md#releasing).
@@ -48,6 +49,7 @@ The appliance is built from Ubuntu Noble cloud image and includes:
   - `go-euc-status` (one-command health check and troubleshooting pointers)
   - `go-euc-migrate` (copy all data and hand-made dashboards from an old appliance, over the network)
   - `go-euc-change-ip` (change the static IP address after setup, e.g. to take over an old appliance's address)
+  - `go-euc-set-ports` (web server on the standard ports 80/443 or the alternative 8080/4443)
   - `go-euc-backup.sh` / `go-euc-restore.sh` (file-based backup and restore)
 - credential and status output (all root-only, mode 600):
   - `/opt/influx-grafana/credentials.env`
@@ -133,7 +135,9 @@ On Nutanix AHV, pass this as the VM's guest customization (cloud-init); on VMwar
 - Grafana: `https://<appliance-ip>/grafana/`
 - GO-EUC Web: `https://<appliance-ip>/goeucweb/`
 - Portainer direct access remains available: `https://<appliance-ip>:9443`. Portainer is the tool for managing the appliance's containers, including the collectors.
+- InfluxDB API at the root, for tools that take a host and port instead of a URL (OBUX, InfluxDB client libraries): `https://<appliance-ip>/api/v2/...` (token required).
 - The InfluxDB container isn't published on the host (nginx serves `:8086` with TLS), and Grafana (`3000`) is bound to localhost; use the HTTPS addresses above.
+- **Web ports:** the addresses above use the standard ports 80/443. With the alternative ports they become `https://<appliance-ip>:4443/...` (HTTP on 8080). Switch on the landing page (*Maintenance → Web ports*), with `sudo go-euc-set-ports standard|alternative`, or before first boot with `APPLIANCE_HTTP_PORT` / `APPLIANCE_HTTPS_PORT` in `config.env` or cloud-init. The Telegraf downloads, `config.txt` and the Proxmox Metric Server settings follow the change; Windows machines already running Telegraf need the new config. 8086, 9443 and 22 don't change. See [docs/external-access.md](docs/external-access.md#setup-3-the-appliance-on-the-alternative-ports-8080--4443).
 
 ## Landing page
 
@@ -142,7 +146,7 @@ On Nutanix AHV, pass this as the VM's guest customization (cloud-init); on VMwar
 - **Services**: Grafana, InfluxDB, Portainer, GO-EUC Web and `config.txt`
 - **Infrastructure collectors**: one card each for VMware vSphere, Nutanix Prism Element and Proxmox VE (see [Infrastructure collectors](#infrastructure-collectors-vsphere-nutanix-proxmox-ve))
 - **Telegraf for Windows**: downloads, the install guide, and **Fetch latest Telegraf package**
-- **Maintenance**: **Run Full Appliance Update**
+- **Maintenance**: **Run Full Appliance Update**, and **Web ports** (standard 80/443 or alternative 8080/4443)
 - **Certificates**: Let's Encrypt setup and **Renew Let's Encrypt Certificate**
 - **Activity**: the output of every action on the page
 
@@ -245,7 +249,7 @@ Proxmox can also push its own built-in metrics directly to the appliance's Influ
 
 The Proxmox card's **Also push Proxmox's own metrics** panel shows the exact values and a ready-to-run command, also recorded in `config.txt` under `ProxmoxMetricServer`. In Proxmox: Datacenter → Metric Server → Add → InfluxDB:
 
-- Server: the appliance address, Port: `443`, Protocol: `HTTPS`
+- Server: the appliance address, Port: `443` (`4443` with the alternative web ports), Protocol: `HTTPS`
 - Organization: the Influx org, Bucket: `Proxmox`, Token: the Proxmox write-only token
 - Advanced: API Path Prefix `/influx`, Verify Certificate off while the appliance uses its self-signed certificate
 
@@ -288,5 +292,7 @@ When configured:
 - `certbot.timer` renews automatically; a deploy hook (`go-euc-letsencrypt-deploy-hook.sh`) copies renewed certificates into nginx, reloads it and re-publishes the Telegraf configs
 - cert renewal is also available from the web UI button
 - the active nginx certificate switches from self-signed to Let's Encrypt
+
+Let's Encrypt validates over port 80 from the internet. DNS, port forwarding and reverse-proxy setups are covered in [docs/external-access.md](docs/external-access.md).
 
 For Windows install steps, see `Telegraf/WINDOWS_INSTALL.md`.

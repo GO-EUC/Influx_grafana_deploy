@@ -100,6 +100,8 @@ query_code() { curl -sk -o /dev/null -w '%{http_code}' -X POST "${INFLUX_API}/ap
 c="$(write_code "${SAVED_TELEGRAF_WRITE_TOKEN}" Performance)"; [[ "$c" == 204 ]] && ok "Telegraf token can write Performance" || bad "Telegraf token write Performance -> ${c}"
 c="$(write_code "${SAVED_TELEGRAF_WRITE_TOKEN}" Tests)"; [[ "$c" =~ ^40[134]$ ]] && ok "Telegraf token cannot write Tests (${c})" || bad "Telegraf token write Tests -> ${c}"
 c="$(query_code "${SAVED_TELEGRAF_WRITE_TOKEN}")"; [[ "$c" =~ ^40[134]$ ]] && ok "Telegraf token cannot read (${c})" || bad "Telegraf token query -> ${c}"
+c="$(curl -sk -o /dev/null -w '%{http_code}' -X POST "https://127.0.0.1/api/v2/write?org=${SAVED_INFLUX_ADMIN_ORG}&bucket=Performance&precision=s" -H "Authorization: Token ${SAVED_TELEGRAF_WRITE_TOKEN}" --data-binary "goeuc_selftest,check=root_api value=1i")"
+[[ "$c" == 204 ]] && ok "InfluxDB API at the root of 443 (/api/v2/write) accepts the Telegraf token" || bad "/api/v2/write at the root -> ${c}"
 c="$(write_code "${SAVED_PROXMOX_WRITE_TOKEN}" Proxmox)"; [[ "$c" == 204 ]] && ok "Proxmox token can write Proxmox" || bad "Proxmox token write Proxmox -> ${c}"
 c="$(write_code "${SAVED_PROXMOX_WRITE_TOKEN}" Performance)"; [[ "$c" =~ ^40[134]$ ]] && ok "Proxmox token cannot write Performance (${c})" || bad "Proxmox token write Performance -> ${c}"
 

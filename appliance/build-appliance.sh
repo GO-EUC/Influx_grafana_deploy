@@ -119,12 +119,14 @@ EOF" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-restore.sh:/usr/local/bin" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-migrate.py:/usr/local/bin" \
   --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-change-ip.sh:/usr/local/bin" \
+  --copy-in "${ROOT_DIR}/appliance/maintenance/go-euc-set-ports.sh:/usr/local/bin" \
   --run-command "ln -sf /usr/local/bin/go-euc-change-ip.sh /usr/local/bin/go-euc-change-ip" \
+  --run-command "ln -sf /usr/local/bin/go-euc-set-ports.sh /usr/local/bin/go-euc-set-ports" \
   --run-command "ln -sf /usr/local/bin/go-euc-status.sh /usr/local/bin/go-euc-status" \
   --run-command "ln -sf /usr/local/bin/go-euc-migrate.py /usr/local/bin/go-euc-migrate" \
   --copy-in "${ROOT_DIR}/appliance/collectors:/opt/go-euc-installer" \
   --run-command "chmod 644 /opt/go-euc-installer/collectors/*.conf" \
-  --run-command "chmod +x /usr/local/bin/go-euc-firstboot.sh /usr/local/bin/go-euc-console-wizard.sh /usr/local/bin/go-euc-autogrow.sh /usr/local/bin/go-euc-upgrade.sh /usr/local/bin/go-euc-appliance-update.sh /usr/local/bin/go-euc-webfiles.py /usr/local/bin/go-euc-ensure-ssh.sh /usr/local/bin/go-euc-postsetup-cleanup.sh /usr/local/bin/go-euc-publish-telegraf-config.sh /usr/local/bin/go-euc-letsencrypt-deploy-hook.sh /usr/local/bin/go-euc-collector.sh /usr/local/bin/go-euc-local-access.sh /usr/local/bin/go-euc-grafana-dashboards.py /usr/local/bin/go-euc-status.sh /usr/local/bin/go-euc-backup.sh /usr/local/bin/go-euc-restore.sh /usr/local/bin/go-euc-migrate.py /usr/local/bin/go-euc-change-ip.sh /opt/go-euc-installer/scripts/step1_install_base.sh /etc/profile.d/go-euc-login-hook.sh" \
+  --run-command "chmod +x /usr/local/bin/go-euc-firstboot.sh /usr/local/bin/go-euc-console-wizard.sh /usr/local/bin/go-euc-autogrow.sh /usr/local/bin/go-euc-upgrade.sh /usr/local/bin/go-euc-appliance-update.sh /usr/local/bin/go-euc-webfiles.py /usr/local/bin/go-euc-ensure-ssh.sh /usr/local/bin/go-euc-postsetup-cleanup.sh /usr/local/bin/go-euc-publish-telegraf-config.sh /usr/local/bin/go-euc-letsencrypt-deploy-hook.sh /usr/local/bin/go-euc-collector.sh /usr/local/bin/go-euc-local-access.sh /usr/local/bin/go-euc-grafana-dashboards.py /usr/local/bin/go-euc-status.sh /usr/local/bin/go-euc-backup.sh /usr/local/bin/go-euc-restore.sh /usr/local/bin/go-euc-migrate.py /usr/local/bin/go-euc-change-ip.sh /usr/local/bin/go-euc-set-ports.sh /opt/go-euc-installer/scripts/step1_install_base.sh /etc/profile.d/go-euc-login-hook.sh" \
   --run-command "ln -sf /etc/systemd/system/go-euc-firstboot.service /etc/systemd/system/multi-user.target.wants/go-euc-firstboot.service" \
   --run-command "ln -sf /etc/systemd/system/go-euc-autogrow.service /etc/systemd/system/multi-user.target.wants/go-euc-autogrow.service" \
   --run-command "ln -sf /etc/systemd/system/go-euc-ensure-ssh.service /etc/systemd/system/multi-user.target.wants/go-euc-ensure-ssh.service" \

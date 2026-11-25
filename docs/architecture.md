@@ -2,6 +2,8 @@
 
 How the GO-EUC appliance is put together: what listens where, how requests are routed, what talks to what, and what to forward on a router when the appliance must be reachable from outside your network. Ports and paths match `scripts/step1_install_base.sh` (Docker Compose) and the nginx configuration written by `appliance/firstboot/go-euc-firstboot.sh`.
 
+The web server's ports are a choice: **standard 80/443** (the default) or **alternative 8080/4443** (*Maintenance → Web ports* on the landing page, or `sudo go-euc-set-ports alternative`). Wherever this page says 80 or 443, read 8080 or 4443 on an appliance using the alternative ports. InfluxDB's 8086, Portainer's 9443 and SSH 22 never change.
+
 ## Overview
 
 ```mermaid
@@ -19,7 +21,7 @@ flowchart LR
             api["API backend<br/>go-euc-webfiles.py<br/>Unix socket + 127.0.0.1:18080"]
         end
         subgraph docker["Docker network monitoring_net"]
-            nginx["nginx (goeuc-nginx)<br/>:80 :443 :8086"]
+            nginx["nginx (goeuc-nginx)<br/>:80 :443 :8086<br/>(alternative: :8080 :4443 :8086)"]
             influx[("InfluxDB 2.7<br/>influxdb:8086")]
             grafana["Grafana<br/>grafana:3000"]
             portainer["Portainer<br/>portainer:9443"]
@@ -40,6 +42,7 @@ flowchart LR
     admin -- "SSH 22" --> ssh
     win -- "HTTPS 443 /influx (write token)" --> nginx
     pve_push -- "HTTPS 443 /influx (Proxmox token)" --> nginx
+    tools["Test tooling / OBUX<br/>(lab or cloud)"] -- "HTTPS 443 /api/v2 (token)" --> nginx
 
     nginx --> grafana
     nginx --> influx
@@ -54,7 +57,7 @@ flowchart LR
     coll -- "polls" --> pve
 ```
 
-- **One way in:** nginx is the only container published on ports 80, 443 and 8086. It terminates TLS (self-signed or Let's Encrypt) and routes requests to the containers on the internal Docker network.
+- **One way in:** nginx is the only container published on ports 80, 443 and 8086 (8080, 4443 and 8086 with the alternative ports). It terminates TLS (self-signed or Let's Encrypt) and routes requests to the containers on the internal Docker network.
 - **Not reachable from outside:** InfluxDB and GO-EUC Web aren't published on the host. Grafana listens on `127.0.0.1:3000` only. The landing page's API backend runs on the host, and nginx reaches it through a Unix socket (`/opt/influx-grafana/run/api.sock`), so it never listens on the network.
 - **Portainer** is the exception: it's also published directly on 9443, its own HTTPS port.
 
@@ -63,8 +66,8 @@ flowchart LR
 | Port | Listens | Service | Who connects |
 |---|---|---|---|
 | 22 | host | SSH (`goeucadmin`, break-glass; password login after the setup wizard) | admins |
-| 80 | nginx | Redirects to HTTPS; Let's Encrypt HTTP validation (`/.well-known/acme-challenge/`) | browsers; Let's Encrypt (from the internet) |
-| 443 | nginx | Landing page, Grafana, Portainer, GO-EUC Web, InfluxDB API (`/influx`), API backend | browsers; Telegraf clients; Proxmox Metric Server |
+| 80 (alternative: 8080) | nginx | Redirects to HTTPS; Let's Encrypt HTTP validation (`/.well-known/acme-challenge/`) | browsers; Let's Encrypt (from the internet) |
+| 443 (alternative: 4443) | nginx | Landing page, Grafana, Portainer, GO-EUC Web, InfluxDB API (`/influx` and `/api/v2`), API backend | browsers; Telegraf clients; Proxmox Metric Server; test tooling |
 | 8086 | nginx | InfluxDB UI and API over TLS (whole host:port is InfluxDB) | admins; tools that want InfluxDB at the root of a host:port |
 | 9443 | Portainer | Portainer direct (HTTPS) | admins (optional) |
 | 3000 | `127.0.0.1` only | Grafana (local health checks) | the appliance itself |
@@ -72,12 +75,14 @@ flowchart LR
 
 Closed on purpose: InfluxDB's own 8086 (nginx serves 8086 instead), Portainer's edge port 8000, and Grafana from the network.
 
+The web ports are kept in `/etc/go-euc/config.env` (`APPLIANCE_HTTP_PORT`, `APPLIANCE_HTTPS_PORT`). `go-euc-set-ports` updates the Compose port mapping, the HTTP → HTTPS redirect, the Telegraf configs, `config.txt` and the install summary, then recreates the nginx container. The landing page calls it through `POST /api/ports`. Inside the container nginx always listens on 80 and 443; only the host side of the mapping changes.
+
 ## Request routing (nginx)
 
 ```mermaid
 flowchart LR
-    c["Client"] --> p80[":80"]
-    c --> p443[":443"]
+    c["Client"] --> p80[":80 (or :8080)"]
+    c --> p443[":443 (or :4443)"]
     c --> p8086[":8086"]
 
     p80 -- "/.well-known/acme-challenge/" --> acme["ACME web root"]
@@ -89,6 +94,7 @@ flowchart LR
     p443 -- "/api/  (login)" --> api2["API backend<br/>(Unix socket)"]
     p443 -- "/grafana/" --> g["grafana:3000/grafana/"]
     p443 -- "/influx/  (prefix stripped)" --> i1["influxdb:8086/"]
+    p443 -- "/api/v2/  (token)" --> i3["influxdb:8086/api/v2/"]
     p443 -- "/portainer/  (prefix stripped)" --> pt["portainer:9443/"]
     p443 -- "/goeucweb/" --> gw["goeucweb:80/"]
 
@@ -100,9 +106,10 @@ flowchart LR
 | `/` | Landing page (static files) | appliance login (`goeucadmin`, HTTP basic auth) |
 | `/telegraf/` | Telegraf package and configs, with a file listing | appliance login |
 | `/config.txt` | All appliance credentials | **no login, local subnet only** (allow-list from `go-euc-local-access.sh`); everyone else gets 403 |
-| `/api/` | API backend: collectors, full update, Let's Encrypt, Telegraf refresh | appliance login |
+| `/api/` | API backend: collectors, full update, Let's Encrypt, Telegraf refresh, web ports (`/api/v2/` is InfluxDB, see below) | appliance login |
 | `/grafana/` | Grafana | Grafana's own login |
 | `/influx/` | InfluxDB API (the `/influx` prefix is stripped; InfluxDB has no base-path setting) | InfluxDB token |
+| `/api/v2/` | InfluxDB API at the root, for tools that take a host and port instead of a URL (OBUX, InfluxDB client libraries) | InfluxDB token |
 | `/portainer/` | Portainer (prefix stripped; WebSocket enabled for consoles) | Portainer's own login |
 | `/goeucweb/` | GO-EUC Web | none |
 
@@ -130,25 +137,33 @@ flowchart LR
 
 ## Reaching the appliance from outside your network (port forwarding)
 
-By default the appliance is meant for a lab network, and nothing needs to be forwarded. Forward ports on your router or firewall only for things that must reach it from the **internet**:
-
-| Need | Forward to the appliance | Also needed |
-|---|---|---|
-| Let's Encrypt certificate | TCP **80** | a public DNS name (A record) pointing at your public IP |
-| Telegraf / test tooling running outside your network (e.g. cloud VMs) | TCP **443** (API at `/influx`), or TCP **8086** | Let's Encrypt (so clients can verify TLS), and a token for that tooling |
-| Remote administration | prefer a VPN; avoid forwarding 22, 9443 or 8086 | |
+By default the appliance is meant for a lab network, and nothing needs to be forwarded. To reach it from the internet (Let's Encrypt, cloud test machines, Grafana from outside), there are three setups. [External access](external-access.md) walks through each one.
 
 ```mermaid
 flowchart LR
-    internet["Internet<br/>(Let's Encrypt, cloud VMs, GitHub runners)"] -- "80, 443 (8086)" --> router["Router / firewall<br/>public IP<br/>port forward"]
-    router -- "80 -> appliance:80<br/>443 -> appliance:443<br/>(8086 -> appliance:8086)" --> nginx["Appliance nginx"]
-    lan["Lab LAN"] -- "443, 8086, 9443, 22" --> nginx
+    internet["Internet<br/>goeuc.example.com"] --> router["Router / firewall<br/>one public IP"]
+
+    router -- "1. default<br/>80 -> appliance:80<br/>443 -> appliance:443" --> a1["Appliance<br/>standard ports 80 / 443"]
+
+    router -- "2. 80, 443" --> proxy["Reverse proxy<br/>(e.g. nginx on Unraid,<br/>any subnet)"]
+    proxy -- "by host name:<br/>goeuc.example.com<br/>-> appliance:80 / :443" --> a2["Appliance<br/>standard ports 80 / 443"]
+    proxy -- "other host names" --> other["Other services"]
+
+    router -- "3. 80 -> appliance:8080<br/>443 -> appliance:4443" --> a3["Appliance<br/>alternative ports 8080 / 4443"]
 ```
 
-Things to know before forwarding 443:
-- The landing page, `/telegraf/` and `/api/` stay behind the appliance login. `/config.txt` stays local-subnet only, so forwarded requests get 403. Grafana, InfluxDB and Portainer use their own logins and tokens.
-- Use Let's Encrypt (Certificates on the landing page) once 80 and DNS are in place. External clients then verify TLS normally, and `go-euc-publish-telegraf-config.sh` switches the Telegraf configs to the DNS name.
-- Forwarded traffic arrives with the client's real source address, so the `config.txt` subnet rule keeps working. Traffic over IPv6 is relayed by Docker's proxy and is always refused for `config.txt`.
+| Setup | Router | Appliance web ports | Certificate |
+|---|---|---|---|
+| 1. Direct (default) | 80 → appliance:80, 443 → appliance:443 | standard 80/443 | Let's Encrypt on the appliance |
+| 2. Reverse proxy (one public IP shared with other services) | 80, 443 → proxy; proxy sends `goeuc.example.com` to appliance:80/443 | standard 80/443 | on the appliance (proxy passes `/.well-known/acme-challenge/` through) or on the proxy |
+| 3. Alternative ports | 80 → appliance:8080, 443 → appliance:4443 | alternative 8080/4443 | Let's Encrypt on the appliance |
+
+Never forward 22, 9443 or 8086; use a VPN for remote administration.
+
+Things to know before forwarding:
+- The landing page, `/telegraf/` and `/api/` stay behind the appliance login. Grafana and Portainer use their own logins, and the InfluxDB API (`/influx`, `/api/v2`) needs a token.
+- `/config.txt` stays local-subnet only. Forwarded requests keep the client's real source address and get 403. Requests through a reverse proxy come from the proxy's address and get 403 unless the proxy is on the appliance's subnet. Traffic over IPv6 is relayed by Docker's proxy and is always refused for `config.txt`.
+- Use Let's Encrypt (Certificates on the landing page) once port 80 and DNS are in place. External clients then verify TLS normally, and `go-euc-publish-telegraf-config.sh` switches the Telegraf configs to the DNS name (with `:4443` on the alternative ports).
 
 ## Outbound connections from the appliance
 
@@ -160,7 +175,7 @@ Things to know before forwarding 443:
 | Azure Blob (`goeucartifacts4hiu9i.blob.core.windows.net`) | 443 | dashboard bundle updates |
 | `acme-v02.api.letsencrypt.org` | 443 | Let's Encrypt |
 | vCenter / Prism Element / Proxmox VE | 443 / 9440 / 8006 | infrastructure collectors |
-| Old appliance | 8086 (+ 443/80 for `config.txt`) | `go-euc-migrate` |
+| Old appliance | 8086 (+ its web port for `config.txt` and Grafana) | `go-euc-migrate` |
 
 ## On disk
 
@@ -172,4 +187,4 @@ Things to know before forwarding 443:
 | `/opt/influx-grafana/run/api.sock` | API backend socket (shared with nginx) |
 | `/opt/influx-grafana/collectors/` | Rendered collector configs (no secrets) |
 | `/opt/influx-grafana/credentials.env`, `install-summary.txt` | Credentials (root-only) |
-| `/etc/go-euc/` | `config.env` (wizard answers), collector settings, break-glass account, dashboard URL |
+| `/etc/go-euc/` | `config.env` (wizard answers, web ports), collector settings, break-glass account, dashboard URL |

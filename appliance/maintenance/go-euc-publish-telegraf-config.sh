@@ -48,7 +48,11 @@ if [[ -z "${appliance_host}" ]]; then
   exit 1
 fi
 
-telegraf_url="https://${appliance_host}/influx"
+# Web server port (go-euc-set-ports): omitted when it is the standard 443.
+https_port="${APPLIANCE_HTTPS_PORT:-443}"
+port_suffix=""
+[[ "${https_port}" != "443" ]] && port_suffix=":${https_port}"
+telegraf_url="https://${appliance_host}${port_suffix}/influx"
 mkdir -p "${TELEGRAF_PUBLIC_DIR}"
 
 shopt -s nullglob

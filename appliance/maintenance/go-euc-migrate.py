@@ -24,6 +24,7 @@ import base64
 import getpass
 import json
 import os
+import re
 import shlex
 import ssl
 import subprocess
@@ -143,7 +144,8 @@ def find_old_influx(old):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("old", help="address (IP or name) of the old appliance")
+    parser.add_argument("old", help="address (IP or name) of the old appliance; add :<port> if its web server "
+                                    "uses non-standard ports (e.g. 192.168.1.50:4443)")
     parser.add_argument("--token", help="old appliance's InfluxDB admin token (default: read from its config.txt, or ask)")
     parser.add_argument("--no-grafana", action="store_true", help="do not copy Grafana dashboards")
     parser.add_argument("--yes", action="store_true", help="do not ask for confirmation")
@@ -157,9 +159,11 @@ def main():
     new_org, new_token = local["SAVED_INFLUX_ADMIN_ORG"], local["SAVED_INFLUX_ADMIN_TOKEN"]
 
     # 1. Old InfluxDB.
-    old_influx, old_tls = find_old_influx(args.old)
+    # "host:port" = web server port (config.txt, Grafana); InfluxDB is always on host:8086.
+    old_host = args.old.rsplit(":", 1)[0] if re.fullmatch(r"[^:]+:\d+", args.old) else args.old
+    old_influx, old_tls = find_old_influx(old_host)
     if not old_influx:
-        die(f"no InfluxDB answering on https://{args.old}:8086 or http://{args.old}:8086. "
+        die(f"no InfluxDB answering on https://{old_host}:8086 or http://{old_host}:8086. "
             "Check the address, that the old appliance is running, and that port 8086 is reachable from here.")
     say(f"old InfluxDB: {old_influx}")
 
@@ -190,7 +194,7 @@ def main():
         g_user, g_pass = cfg.get(("Grafana", "Username")), cfg.get(("Grafana", "Password"))
         if g_user and g_pass:
             g_auth = {"Authorization": "Basic " + base64.b64encode(f"{g_user}:{g_pass}".encode()).decode()}
-            for base in (f"https://{args.old}/grafana", f"http://{args.old}:3000/grafana"):
+            for base in (f"https://{args.old}/grafana", f"http://{old_host}:3000/grafana"):
                 code, _ = http_json("GET", f"{base}/api/user", g_auth)
                 if code == 200:
                     grafana_old = (base, g_auth)

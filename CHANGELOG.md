@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Web ports:** the web server (nginx) can use the standard ports 80/443 or the alternative 8080/4443. Switch on the landing page (*Maintenance → Web ports*), with `sudo go-euc-set-ports standard|alternative`, or before first boot with `APPLIANCE_HTTP_PORT` / `APPLIANCE_HTTPS_PORT`. The Telegraf configs, `config.txt` (new `HTTPPort` / `HTTPSPort` entries), the install summary and the Proxmox Metric Server settings follow the change, and `go-euc-status`, `go-euc-change-ip` and `go-euc-migrate` (`<old-ip>:<port>`) know about it.
+- **InfluxDB API at the root** of the web port (`https://<appliance>/api/v2/...`, token required), for tools that take a host and port instead of a URL, such as OBUX and the InfluxDB client libraries.
+- **[External access guide](docs/external-access.md):** DNS, port forwarding straight to the appliance, through a reverse proxy (for example nginx on Unraid, one public IP), or on the alternative ports; what's exposed; Let's Encrypt troubleshooting. The architecture page shows the three setups.
+
 ## v2.0 (2026-11-25)
 
 Major release. Existing appliances move to it by deploying a new appliance and running `sudo go-euc-migrate <old-ip>` on it (see `docs/switching-appliances.md`).

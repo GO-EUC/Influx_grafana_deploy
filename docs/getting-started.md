@@ -44,9 +44,9 @@ The GO-EUC appliance is a ready-made Ubuntu virtual machine that collects and sh
 
   | Port | Used for |
   |---|---|
-  | 443 | Landing page, Grafana, Portainer, GO-EUC Web, and the InfluxDB API that Telegraf writes to |
+  | 443 | Landing page, Grafana, Portainer, GO-EUC Web, and the InfluxDB API that Telegraf writes to (4443 with the alternative web ports) |
   | 8086 | InfluxDB web UI and API (HTTPS) |
-  | 80 | Redirects to HTTPS. For Let's Encrypt it must be reachable **from the internet** (HTTP validation). |
+  | 80 | Redirects to HTTPS. For Let's Encrypt it must be reachable **from the internet** (HTTP validation). 8080 with the alternative web ports. |
   | 9443 | Portainer direct (optional) |
   | 22 | SSH for administration (optional) |
 
@@ -144,8 +144,11 @@ The wizard keeps extra settings in `config.env`. The same works for the other ov
 **Collect hypervisor metrics (optional)**
 Under **Infrastructure collectors** on the landing page, fill in the card for VMware vSphere, Nutanix Prism Element or Proxmox VE and click *Save and Start*. See [Infrastructure collectors](../README.md#infrastructure-collectors-vsphere-nutanix-proxmox-ve).
 
-**Trusted certificate (optional)**
-If the appliance has a public DNS name and port 80 is reachable from the internet, use **Certificates → Let's Encrypt setup** on the landing page. Renewals are automatic.
+**Trusted certificate and access from the internet (optional)**
+If the appliance has a public DNS name and port 80 is reachable from the internet, use **Certificates → Let's Encrypt setup** on the landing page. Renewals are automatic. [External access](external-access.md) explains the DNS record and port forwarding: straight to the appliance, through a reverse proxy you already run, or on the alternative ports.
+
+**Web ports (optional)**
+If ports 80/443 are taken, switch the appliance to 8080/4443 under **Maintenance → Web ports** (or `sudo go-euc-set-ports alternative`). The landing page then lives at `https://<appliance-ip>:4443/`.
 
 **Keep it up to date**
 Use **Maintenance → Run Full Appliance Update** now and then. It updates Ubuntu, the containers, the dashboards and Telegraf.
@@ -158,7 +161,7 @@ Start with **`sudo go-euc-status`** on the appliance console or over SSH. It che
 |---|---|
 | Banner says `FAILED: No internet access` | The appliance couldn't reach the sites in [Requirements](#2-requirements); the banner lists which. Fix the firewall or network (no proxy support) and reboot, and setup carries on automatically. If you mistyped the IP, gateway or DNS in the wizard, log in and run `sudo go-euc-console-wizard.sh` to enter them again; it reboots and setup resumes. |
 | Banner says `FAILED` with another reason | Run `sudo go-euc-status` and `sudo tail -100 /var/log/go-euc-install.log`. During setup, the banner also shows the **break-glass** account (`recovery`) for logging in if `goeucadmin` doesn't work. |
-| Web page doesn't load | Check the VM has the IP you expect (`ip a` on the console) and that port 443 is reachable from your PC. |
+| Web page doesn't load | Check the VM has the IP you expect (`ip a` on the console) and that port 443 is reachable from your PC. If the web ports were switched to the alternative ones, the page is at `https://<ip>:4443/`; `sudo go-euc-set-ports standard` switches back. |
 | Browser certificate warning | Expected with the default self-signed certificate (see [First login](#6-first-login)). |
 | Forgot the `goeucadmin` password | From a computer on the appliance's subnet, open `https://<ip>/config.txt`. It lists the appliance login and the break-glass account. |
 | A collector shows an error | The card's message and the Activity panel show the reason. Also try `sudo go-euc-collector.sh <vsphere\|nutanix\|proxmox> status`. |

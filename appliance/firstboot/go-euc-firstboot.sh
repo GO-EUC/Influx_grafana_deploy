@@ -297,12 +297,17 @@ publish_final_summary() {
   if [[ -z "${host_ip}" ]]; then
     host_ip="<unknown>"
   fi
+  # Web server port (go-euc-set-ports: standard 443, alternative 4443).
+  local https_base="https://${host_ip}"
+  if [[ "${APPLIANCE_HTTPS_PORT:-443}" != "443" ]]; then
+    https_base="${https_base}:${APPLIANCE_HTTPS_PORT}"
+  fi
 
   cat > "${SUMMARY_FILE}" <<EOF
 ============================================================
 GO-EUC APPLIANCE SETUP COMPLETE
 ============================================================
-Appliance Login (also the web page login for https://${host_ip}/)
+Appliance Login (also the web page login for ${https_base}/)
   Username: ${APPLIANCE_LOGIN_USER_RESOLVED}
   Password: ${APPLIANCE_LOGIN_PASSWORD_RESOLVED}
 
@@ -311,15 +316,15 @@ Break Glass
   Password: ${BREAK_GLASS_PASSWORD_RESOLVED}
 
 Portainer
-  URL:      https://${host_ip}/portainer/
+  URL:      ${https_base}/portainer/
   Username: ${saved_portainer_user}
   Password: ${saved_portainer_password}
 
 GO-EUC Web
-  URL:      https://${host_ip}/goeucweb/
+  URL:      ${https_base}/goeucweb/
 
 InfluxDB
-  URL:      https://${host_ip}:8086/  (API also at https://${host_ip}/influx)
+  URL:      https://${host_ip}:8086/  (API also at ${https_base}/influx)
   Username: ${saved_influx_user}
   Password: ${saved_influx_password}
   Org:      ${saved_influx_org}
@@ -328,7 +333,7 @@ InfluxDB
   Proxmox Metric Server write-only token (Proxmox bucket): ${saved_proxmox_token}
 
 Grafana
-  URL:      https://${host_ip}/grafana/
+  URL:      ${https_base}/grafana/
   Username: ${saved_grafana_user}
   Password: ${saved_grafana_password}
 
@@ -361,17 +366,19 @@ GeneratedUTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 ApplianceIP=${host_ip}
 
 ServiceEndpoints
-HTTPSBase=https://${host_ip}
+HTTPSBase=${https_base}
 RelativeGrafana=/grafana/
 RelativeInflux=/influx/
 RelativePortainer=/portainer/
 RelativeGoeucWeb=/goeucweb/
-GrafanaURL=https://${host_ip}/grafana/
+GrafanaURL=${https_base}/grafana/
 InfluxURL=https://${host_ip}:8086/
-InfluxApiURL=https://${host_ip}/influx
-PortainerURL=https://${host_ip}/portainer/
-GoeucWebURL=https://${host_ip}/goeucweb/
+InfluxApiURL=${https_base}/influx
+PortainerURL=${https_base}/portainer/
+GoeucWebURL=${https_base}/goeucweb/
 PortainerDirectURL=https://${host_ip}:9443
+HTTPPort=${APPLIANCE_HTTP_PORT:-80}
+HTTPSPort=${APPLIANCE_HTTPS_PORT:-443}
 PortainerPort=9443
 InfluxPort=8086
 GoeucWebContainerPort=80
@@ -400,7 +407,7 @@ Password=${saved_grafana_password}
 
 Telegraf
 PackageFolder=${TELEGRAF_PUBLIC_DIR}
-InfluxURL=https://${host_ip}/influx
+InfluxURL=${https_base}/influx
 InfluxOrg=${saved_influx_org}
 InfluxBucket=Performance
 InfluxToken=${saved_telegraf_token}
@@ -408,7 +415,7 @@ InfluxTokenScope=write-only (Performance bucket)
 
 ProxmoxMetricServer
 Server=${host_ip}
-Port=443
+Port=${APPLIANCE_HTTPS_PORT:-443}
 Protocol=https
 ApiPathPrefix=/influx
 Organization=${saved_influx_org}
@@ -862,6 +869,8 @@ EOF
   chmod 755 "${NGINX_CERT_SETUP_SCRIPT}"
 
   cat > "${NGINX_CONF_DIR}/default.conf" <<'EOF'
+# The HTTP -> HTTPS redirect below includes the HTTPS port when it is not 443; it is rewritten
+# by go-euc-set-ports (landing page: Maintenance > Web ports).
 # InfluxDB UI and API on InfluxDB's usual port, over TLS. Its web UI only works at the root
 # of a host:port (it loads /<hash>.js and calls /api/v2), so it cannot live under /influx/.
 server {
@@ -933,6 +942,18 @@ server {
   # InfluxDB API under /influx (Telegraf clients, Proxmox Metric Server "API Path Prefix").
   # InfluxDB has no base-path option, so the prefix is stripped here (trailing slash on
   # proxy_pass). The web UI is on https://<appliance>:8086/ instead.
+  # InfluxDB API at the root of 443 as well (/api/v2/...), for clients that need InfluxDB at a
+  # plain https://host address (e.g. benchmarkle, OBUX). More specific than /api/ below, which is
+  # the appliance's own API. Token-protected, like /influx/.
+  location /api/v2/ {
+    client_max_body_size 32m;
+    proxy_pass http://influxdb:8086;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+  }
+
   location /influx/ {
     # Telegraf batches and Proxmox Metric Server pushes (default max body 25 MB) exceed nginx's 1 MB default.
     client_max_body_size 32m;
@@ -1193,10 +1214,20 @@ pveum acl modify / -role PVEAuditor -token 'telegraf@pve!monitoring'</pre>
 
     <section id="maintenance">
       <h2>Maintenance</h2>
+      <div class="grid wide">
       <div class="card">
         <h3>Full appliance update</h3>
         <p>Updates Ubuntu packages, refreshes the pinned container images (InfluxDB, Grafana, Portainer, GO-EUC Web, nginx and any enabled collectors), reloads the dashboard bundle, refreshes the Telegraf package and configs, and updates the local-subnet access list. This can take a while.</p>
         <button id="fullUpdateBtn" type="button">Run Full Appliance Update</button>
+      </div>
+      <div class="card" id="portsCard">
+        <h3>Web ports <span id="portsBadge" class="badge">checking...</span></h3>
+        <p>The ports this page, Grafana, Portainer and the InfluxDB API (<code>/influx</code>) are served on. Use the alternative ports when 80/443 are taken, for example by another web server you forward to.</p>
+        <label class="check"><input type="radio" name="portProfile" value="standard"> Standard: HTTP 80, HTTPS 443</label>
+        <label class="check"><input type="radio" name="portProfile" value="alternative"> Alternative: HTTP 8080, HTTPS 4443</label>
+        <button id="portsBtn" type="button">Apply ports</button>
+        <div class="hint">The web server restarts and this page moves to the new address. Telegraf configs, <code>config.txt</code> and the Proxmox Metric Server settings follow automatically; Telegraf already installed on Windows machines must get the new config. Router port forwards (external 80/443) must point at the new ports. InfluxDB's own port 8086, Portainer 9443 and SSH 22 do not change.</div>
+      </div>
       </div>
     </section>
 
@@ -1351,6 +1382,37 @@ pveum acl modify / -role PVEAuditor -token 'telegraf@pve!monitoring'</pre>
     }
     loadProxmoxPush();
 
+    // Web ports (nginx): standard 80/443 or alternative 8080/4443.
+    async function loadPorts() {
+      const badge = document.getElementById('portsBadge');
+      try {
+        const res = await fetch('/api/ports', { cache: 'no-store' });
+        const p = await res.json();
+        setBadge(badge, `HTTP ${p.http} / HTTPS ${p.https}`, 'ok');
+        document.querySelectorAll('input[name=portProfile]').forEach((r) => { r.checked = (r.value === p.profile); });
+      } catch (err) {
+        setBadge(badge, 'unknown', 'err');
+      }
+    }
+    loadPorts();
+
+    document.getElementById('portsBtn').addEventListener('click', async () => {
+      const choice = document.querySelector('input[name=portProfile]:checked');
+      if (!choice) return;
+      const ports = choice.value === 'alternative' ? 'HTTP 8080 and HTTPS 4443' : 'HTTP 80 and HTTPS 443';
+      if (!confirm(`Switch the web server to ${ports}? The page reloads on the new address; update your router's port forwards to match.`)) return;
+      const result = await runAction('Changing web ports...', '/api/ports', {
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profile: choice.value })
+      }, (res, payload) => payload.message || (res.ok ? 'Ports changed.' : 'Changing ports returned an error.'));
+      if (!result || !result.res.ok || !result.payload.changed) return;
+      const target = `https://${location.hostname}${result.payload.https === 443 ? '' : ':' + result.payload.https}/`;
+      status.textContent = `${result.payload.message} Moving to ${target} ...`;
+      setBusyState(true);
+      // Wait for the restart, then follow the page to its new address.
+      setTimeout(() => { location.href = target; }, 10000);
+    });
+
     document.querySelectorAll('.collector').forEach((card) => {
       const type = card.dataset.collector;
       const label = card.querySelector('h3').firstChild.textContent.trim();
@@ -1386,6 +1448,9 @@ pveum acl modify / -role PVEAuditor -token 'telegraf@pve!monitoring'</pre>
 EOF
   chmod 644 "${PUBLIC_INDEX_FILE}"
   "${NGINX_CERT_SETUP_SCRIPT}" || true
+  # Web server ports (config.env APPLIANCE_HTTP_PORT / APPLIANCE_HTTPS_PORT; default 80/443):
+  # writes the redirect now; the installer publishes nginx on the same ports.
+  /usr/local/bin/go-euc-set-ports.sh "${APPLIANCE_HTTP_PORT:-80}" "${APPLIANCE_HTTPS_PORT:-443}" --no-restart || true
 
   systemctl daemon-reload || true
   systemctl enable --now go-euc-webfiles.service || true

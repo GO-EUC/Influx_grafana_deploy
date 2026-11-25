@@ -22,6 +22,7 @@ It was written to verify the security hardening, the infrastructure collectors (
 | `checks/migrate_checks.sh` | client | Runs `go-euc-migrate <old>` on the new appliance. Checks every old point arrived (across orgs), hand-made dashboards were copied, preloaded ones weren't duplicated, the old appliance is unchanged, and a re-run is harmless. |
 | `checks/backup_restore_checks.sh` | client | Restores a `go-euc-backup.sh` archive from another appliance (`--with-grafana`). Checks every point arrived in the target's own org, collectors restored, Grafana login and data source after the DB restore, and that a second restore is harmless. |
 | `checks/maintenance_checks.sh` | client | Fetch latest Telegraf, **Run Full Appliance Update**, reboot, and every on-box check again. |
+| `checks/ports_checks.sh` | client | Switches the web ports to the alternative 8080/4443 through the landing page API, checks every route, the redirect, the old port closed, Telegraf configs, `config.txt`, `config.env`, Compose and `go-euc-status`; switches back to 80/443 with `go-euc-set-ports` and checks again. |
 
 Every check prints `PASS`, `FAIL` or `INFO`, and nothing prints passwords or tokens. Secrets are read from files and handed to `curl` through temporary config files, so they never appear on the command line.
 
@@ -70,6 +71,7 @@ $SSH "sudo EXPECTED_IP=$IP EXPECTED_HOST=$VM bash -s" < testing/checks/remote_ch
 $SSH 'sudo bash -s' < testing/checks/wizard_check.sh
 testing/checks/http_checks.sh "$IP" 403     # 403: client NOT on the appliance subnet; use 200 if it is
 testing/checks/collector_checks.sh "$IP"
+testing/checks/ports_checks.sh "$IP"          # standard -> alternative (8080/4443) -> standard
 testing/checks/maintenance_checks.sh "$IP" "$VM"   # long: full update upgrades Ubuntu packages, then reboots
 
 # Moving data: back up a source appliance, restore it onto this one

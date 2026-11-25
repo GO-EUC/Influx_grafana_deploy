@@ -94,6 +94,10 @@ fi
 DASHBOARDS_ZIP_URL="${DASHBOARDS_ZIP_URL:-${DEFAULT_DASHBOARDS_ZIP_URL}}"
 GRAFANA_DATASOURCE_NAME="DS_GO"
 GRAFANA_DATASOURCE_UID="DS_GO"
+# Web server ports (go-euc-set-ports: standard 80/443, alternative 8080/4443).
+config_port() { sed -n "s/^$1=//p" /etc/go-euc/config.env 2>/dev/null | tail -1; }
+NGINX_HTTP_PORT="${APPLIANCE_HTTP_PORT:-$(config_port APPLIANCE_HTTP_PORT)}"; NGINX_HTTP_PORT="${NGINX_HTTP_PORT:-80}"
+NGINX_HTTPS_PORT="${APPLIANCE_HTTPS_PORT:-$(config_port APPLIANCE_HTTPS_PORT)}"; NGINX_HTTPS_PORT="${NGINX_HTTPS_PORT:-443}"
 
 # Persist resolved values for idempotent reruns and easier troubleshooting.
 # Values are shell-quoted with %q so any characters survive being sourced.
@@ -623,8 +627,8 @@ services:
     container_name: goeuc-nginx
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
+      - "${NGINX_HTTP_PORT}:80"
+      - "${NGINX_HTTPS_PORT}:443"
       - "8086:8086"
     volumes:
       - ${INSTALL_ROOT}/public:/usr/share/nginx/html:ro

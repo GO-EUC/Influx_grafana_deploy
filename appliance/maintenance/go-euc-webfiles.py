@@ -9,6 +9,7 @@ import re
 import shlex
 import socketserver
 import subprocess
+import time
 import urllib.parse
 
 PUBLIC_DIR = "/opt/influx-grafana/public"
@@ -269,7 +270,7 @@ def _proxmox_metric_server(request_host):
     server = config.get("APPLIANCE_LETSENCRYPT_DOMAIN") if le_active else (request_host or "").split(":")[0]
     return {
         "server": server,
-        "port": 443,
+        "port": int(config.get("APPLIANCE_HTTPS_PORT") or 443),
         "protocol": "https",
         "api_path_prefix": "/influx",
         "organization": credentials.get("SAVED_INFLUX_ADMIN_ORG", ""),
@@ -277,6 +278,19 @@ def _proxmox_metric_server(request_host):
         "token": credentials.get("SAVED_PROXMOX_WRITE_TOKEN", ""),
         "verify_certificate": le_active,
     }
+
+
+PORT_PROFILES = {"standard": (80, 443), "alternative": (8080, 4443)}
+SET_PORTS_CMD = "/usr/local/bin/go-euc-set-ports.sh"
+
+
+def _web_ports():
+    config = _read_env_file(CONFIG_ENV_FILE)
+    http_port = int(config.get("APPLIANCE_HTTP_PORT") or 80)
+    https_port = int(config.get("APPLIANCE_HTTPS_PORT") or 443)
+    profile = next((name for name, ports in PORT_PROFILES.items() if ports == (http_port, https_port)), "custom")
+    return {"http": http_port, "https": https_port, "profile": profile,
+            "profiles": {name: {"http": p[0], "https": p[1]} for name, p in PORT_PROFILES.items()}}
 
 
 COLLECTOR_ROUTE = re.compile(r"^/api/collectors/([a-z]+)/(status|configure|disable)$")
@@ -320,6 +334,9 @@ class GoEucHandler(http.server.SimpleHTTPRequestHandler):
         if route and route[1] == "status":
             self._send_json(200, _collector_status(route[0]))
             return
+        if urllib.parse.urlsplit(self.path).path == "/api/ports":
+            self._send_json(200, _web_ports())
+            return
         if urllib.parse.urlsplit(self.path).path == "/api/proxmox-metric-server":
             self._send_json(200, _proxmox_metric_server(self.headers.get("Host", "")))
             return
@@ -327,6 +344,33 @@ class GoEucHandler(http.server.SimpleHTTPRequestHandler):
             self.send_error(404, "Unknown API endpoint")
             return
         super().do_GET()
+
+    def _handle_set_ports(self, raw_body):
+        try:
+            payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+        except Exception:
+            self._send_json(400, {"ok": False, "message": "Invalid JSON payload."})
+            return
+        profile = str(payload.get("profile", ""))
+        if profile not in PORT_PROFILES:
+            self._send_json(400, {"ok": False, "message": "Unknown port profile; use 'standard' or 'alternative'."})
+            return
+        http_port, https_port = PORT_PROFILES[profile]
+        if _web_ports()["profile"] == profile:
+            self._send_json(200, {"ok": True, "message": f"Already using {profile} ports ({http_port}/{https_port}).",
+                                  "http": http_port, "https": https_port, "changed": False})
+            return
+        # The change restarts nginx, which carries this very request: run it a few seconds
+        # later as its own systemd unit, so this response reaches the browser first.
+        unit = f"goeuc-set-ports-{int(time.time())}"
+        result = subprocess.run(["systemd-run", "--unit", unit, "--collect", "--on-active=3",
+                                 SET_PORTS_CMD, profile], capture_output=True, text=True)
+        if result.returncode != 0:
+            self._send_json(500, {"ok": False, "message": f"Could not schedule the change: {result.stderr.strip()[:200]}"})
+            return
+        self._send_json(200, {"ok": True, "changed": True, "http": http_port, "https": https_port,
+                              "message": f"Switching to {profile} ports: HTTP {http_port}, HTTPS {https_port}. "
+                                         "The web server restarts in a few seconds."})
 
     def _handle_configure_collector(self, collector_type, raw_body):
         spec = COLLECTORS[collector_type]
@@ -383,6 +427,10 @@ class GoEucHandler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         content_length = int(self.headers.get("Content-Length", "0"))
         raw_body = self.rfile.read(content_length) if content_length > 0 else b""
+
+        if self.path == "/api/ports":
+            self._handle_set_ports(raw_body)
+            return
 
         route = _match_collector_route(self.path)
         if route and route[1] == "configure":

@@ -84,17 +84,20 @@ done
 [[ -n "${any}" ]] || warn "none configured (landing page > Infrastructure collectors)"
 
 section "Endpoints (from the appliance itself)"
+# Web server port (go-euc-set-ports); 8086 is fixed.
+https_port="$(sed -n 's/^APPLIANCE_HTTPS_PORT=//p' /etc/go-euc/config.env 2>/dev/null | tail -1)"
+web="https://127.0.0.1:${https_port:-443}"
 probe() {
   local desc="$1" want="$2" url="$3" got
   got="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 8 "${url}")"
   [[ "${got}" =~ ^(${want})$ ]] && ok "${desc} (${got})" || bad "${desc}: got ${got}, expected ${want}   ${url}"
 }
-probe "landing page asks for login" "401" "https://127.0.0.1/"
-probe "Grafana" "200|302" "https://127.0.0.1/grafana/"
-probe "InfluxDB API via /influx" "200" "https://127.0.0.1/influx/health"
+probe "landing page asks for login" "401" "${web}/"
+probe "Grafana" "200|302" "${web}/grafana/"
+probe "InfluxDB API via /influx" "200" "${web}/influx/health"
 probe "InfluxDB UI/API on :8086" "200" "https://127.0.0.1:8086/health"
-probe "Portainer" "200" "https://127.0.0.1/portainer/"
-probe "GO-EUC Web" "200" "https://127.0.0.1/goeucweb/"
+probe "Portainer" "200" "${web}/portainer/"
+probe "GO-EUC Web" "200" "${web}/goeucweb/"
 probe "landing page API backend" "200" "http://127.0.0.1:18080/api/collectors/nutanix/status"
 
 section "Recent errors"

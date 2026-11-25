@@ -92,5 +92,7 @@ for f in /etc/issue /opt/influx-grafana/public/config.txt /opt/influx-grafana/in
   replace_ip "${f}" "${old_cidr%/*}" "${NEW_CIDR%/*}"
 done
 
-echo "[change-ip] Done. The appliance is now at https://${NEW_CIDR%/*}/"
-echo "[change-ip] Windows machines need Telegraf configs from the new address (https://${NEW_CIDR%/*}/telegraf/)."
+https_port="$(sed -n 's/^APPLIANCE_HTTPS_PORT=//p' /etc/go-euc/config.env 2>/dev/null | tail -1)"
+web="https://${NEW_CIDR%/*}"; [[ "${https_port:-443}" != 443 ]] && web="${web}:${https_port}"
+echo "[change-ip] Done. The appliance is now at ${web}/"
+echo "[change-ip] Windows machines need Telegraf configs from the new address (${web}/telegraf/)."
