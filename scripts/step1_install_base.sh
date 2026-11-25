@@ -289,6 +289,8 @@ download_dashboards_zip() {
     return 1
   fi
   rm -f "${tmp_zip}"
+  # Grafana (uid 472) must be able to read every file, whatever permissions the zip recorded.
+  chmod -R a+rX "${STACK_DIR}/grafana/dashboards"
 
   local dashboard_files=("${STACK_DIR}"/grafana/dashboards/**/*.json)
   DASHBOARD_JSON_COUNT="${#dashboard_files[@]}"

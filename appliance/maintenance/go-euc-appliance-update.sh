@@ -88,6 +88,8 @@ mkdir -p "${DASHBOARDS_DIR}"
 rm -rf "${DASHBOARDS_DIR}/"*
 unzip -oq "${tmp_zip}" -d "${DASHBOARDS_DIR}" -x '__MACOSX/*' '._*' '*/._*'
 rm -f "${tmp_zip}"
+# Grafana (uid 472) must be able to read every file, whatever permissions the zip recorded.
+chmod -R a+rX "${DASHBOARDS_DIR}"
 
 echo "[full-update] Normalizing datasource placeholders in dashboard JSON files..."
 shopt -s globstar nullglob

@@ -180,6 +180,6 @@ Fresh VM #5 (`.131`), provisioned in 129 s.
 | `maintenance_checks.sh` | update (75 s) and reboot passed; on-box after reboot 89/89 (after counting only file-provisioned dashboards: migrated ones live alongside them) |
 
 Open items:
-- **Dashboard bundles differ.** The published bundle has a *Troubleshooting* dashboard that the repo's `Dashboards.zip` lacks, and the repo has 4 dashboards the published bundle lacks. `main` builds publish the repo bundle, so add Troubleshooting to the repo before merging, or appliances will lose it on their next full update.
+- ~~Dashboard bundles differ~~: resolved for v2.0. *Troubleshooting* was added to the repo's `Dashboards.zip` (data source placeholder resolved). All 7 dashboards were verified to provision on the final build with no errors.
 - **Switching from appliances built before November 2026** (InfluxDB on `http://<old>:8086`, token in the old `config.txt`'s Telegraf section) is implemented but not yet tested on a real old appliance.
 - Not covered by this environment: the manual checks above (real console wizard, browser walkthrough, `config.txt` from the appliance subnet, Windows client, real vCenter / Proxmox VE, Proxmox Metric Server push, Let's Encrypt).
