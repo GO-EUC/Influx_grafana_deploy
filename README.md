@@ -12,7 +12,15 @@ This repository builds and publishes the GO-EUC virtual appliance as an OVA (VMw
 - optional infrastructure collectors for VMware vSphere, Nutanix Prism Element and Proxmox VE (Telegraf containers on the appliance), plus a ready-made Proxmox Metric Server target
 - a landing page (`https://<appliance-ip>/`) that ties it all together
 
-The preferred way to use this project is the appliance image, not running the installer script manually. See [CHANGELOG.md](CHANGELOG.md) for what changed, and [testing/README.md](testing/README.md) for the end-to-end test.
+## Start here
+
+- **New to the appliance?** Follow [docs/getting-started.md](docs/getting-started.md): requirements, download, import on VMware, Hyper-V, Nutanix or Proxmox, setup, first login, next steps and troubleshooting.
+- **Download:** [Releases](https://github.com/GO-EUC/Influx_grafana_deploy/releases), with OVA (VMware) and VHD (Hyper-V, Nutanix AHV, Proxmox VE/KVM) links in each release.
+- **Something not working?** Run `sudo go-euc-status` on the appliance; see [Troubleshooting](docs/getting-started.md#8-troubleshooting).
+- **Moving to a new release?** Follow [docs/switching-appliances.md](docs/switching-appliances.md): deploy the new appliance, run `sudo go-euc-migrate <old-ip>` on it, switch clients over, switch the old one off.
+- **What changed:** [CHANGELOG.md](CHANGELOG.md). **Building, releasing and testing the appliance:** [docs/development.md](docs/development.md).
+
+The rest of this README is the reference for each feature.
 
 ## What the appliance contains
 
@@ -36,6 +44,10 @@ The appliance is built from Ubuntu Noble cloud image and includes:
   - `go-euc-local-access.sh` (local-subnet allow-list for `config.txt`)
   - `go-euc-letsencrypt-deploy-hook.sh` (applies renewed certificates to nginx)
   - `go-euc-grafana-dashboards.py` (wraps bare Grafana v2 dashboard exports so file provisioning accepts them)
+  - `go-euc-status` (one-command health check and troubleshooting pointers)
+  - `go-euc-migrate` (copy all data and hand-made dashboards from an old appliance, over the network)
+  - `go-euc-change-ip` (change the static IP address after setup, e.g. to take over an old appliance's address)
+  - `go-euc-backup.sh` / `go-euc-restore.sh` (file-based backup and restore)
 - credential and status output (all root-only, mode 600):
   - `/opt/influx-grafana/credentials.env`
   - `/opt/influx-grafana/appliance-login.env`
@@ -79,7 +91,7 @@ The appliance is built from Ubuntu Noble cloud image and includes:
   - Requests that reach the appliance over IPv6 are always refused, because Docker's proxy hides their real source address.
   - The file itself is mode 640 (root and the nginx container only). On the appliance: `sudo cat /opt/influx-grafana/public/config.txt`, or `curl http://127.0.0.1:18080/config.txt`.
 - Telegraf clients get a write-only token scoped to the `Performance` bucket, not the InfluxDB admin token.
-- SSH password authentication is only enabled after the console wizard has replaced the default password.
+- SSH password login (for `goeucadmin` and the break-glass account) is enabled once the console wizard has replaced the default password. A drop-in, `/etc/ssh/sshd_config.d/10-go-euc.conf`, overrides the Ubuntu cloud image's `60-cloudimg-settings.conf`, which disables password login.
 
 Optional: you can pre-seed or manually edit `/etc/go-euc/config.env` using `appliance/firstboot/config.env.example`.
 
@@ -181,6 +193,14 @@ Bump them deliberately: Grafana and Portainer data can't be downgraded safely.
 
 Optional daily container refresh: set `AUTO_UPGRADE_ENABLED=true` in `/etc/go-euc/config.env` before first boot to enable `go-euc-upgrade.timer`. It pulls the pinned images, recreates the stack and refreshes enabled collectors. It doesn't upgrade Ubuntu packages; use **Run Full Appliance Update** for that.
 
+**Status:** `sudo go-euc-status` shows setup state, network and internet access, services, containers, collectors, the health of every web address, recent errors, and where each log is. The console banner points to it.
+
+**Moving to a new appliance:** a full update doesn't replace the appliance's own scripts, so a new release means deploying a new appliance. On the new appliance, `sudo go-euc-migrate <old-ip>` reads the old appliance's InfluxDB token from its `config.txt` (or asks for it). It copies every bucket over the InfluxDB API into the new appliance's own buckets and org, keeping the new tokens, plus dashboards made by hand in the old Grafana. The old appliance is only read. `sudo go-euc-change-ip <ip/prefix>` moves the new appliance onto the old address afterwards. Full guide: [docs/switching-appliances.md](docs/switching-appliances.md).
+
+**File-based backup:** `sudo go-euc-backup.sh` exports every InfluxDB bucket (as line protocol), the collector settings, the carry-over settings and Grafana's database into one root-only archive. It's standalone, so it also runs when copied onto older appliances. `sudo go-euc-restore.sh <archive> [--with-grafana]` writes the data into the new appliance's own buckets and org, keeping its tokens. It then starts the restored collectors and, with `--with-grafana`, restores Grafana's database and resets its admin password to the new appliance's. It needs a way to move the archive (SSH/`scp` or the console), so it suits regular backups; for switching appliances, `go-euc-migrate` is simpler.
+
+**First-boot internet check:** before installing anything, first boot checks that the Ubuntu mirrors and Docker are reachable. If not, it stops with `FAILED: No internet access …` on the console, naming the unreachable sites. Fix the network and reboot to resume. Required and optional sites: [Requirements](docs/getting-started.md#2-requirements).
+
 The landing page's Certificates section has the **Let's Encrypt Setup** form (`POST /api/configure-letsencrypt`) and **Renew Let's Encrypt Certificate** (`POST /api/renew-letsencrypt`). See [TLS certificates](#tls-certificates).
 
 ## Infrastructure collectors (vSphere, Nutanix, Proxmox VE)
@@ -269,43 +289,3 @@ When configured:
 - the active nginx certificate switches from self-signed to Let's Encrypt
 
 For Windows install steps, see `Telegraf/WINDOWS_INSTALL.md`.
-
-## Build and release workflow
-
-Workflow file: `.github/workflows/build-appliance.yml`
-
-Triggers:
-
-- push to `dev`: build appliance + upload images to Azure Blob storage
-- push to `main`: build appliance + upload images to Azure Blob storage + publish `Dashboards.zip` to the `files` container + auto-create the next GitHub Release (`v1.0`, `v1.1`, `v1.2`, ...)
-- manual run: `workflow_dispatch`
-
-Images uploaded to the Azure Blob container (`vars.AZURE_STORAGE_CONTAINER`):
-
-- `go-euc-appliance-<timestamp>-<sha>.ova`
-- `go-euc-appliance-<timestamp>-<sha>.vhd`
-- matching `.sha256` for each image format
-
-The images are too large for GitHub Release assets, so each GitHub Release body contains download links to the Azure Blob files. The Azure prerequisites (storage account, containers, GitHub OIDC identity) are created by the Terraform in `terraform/`.
-
-## Local build (optional)
-
-From repo root:
-
-```bash
-bash appliance/build-appliance.sh
-```
-
-The appliance image is customized during build using `virt-customize` from libguestfs: [virt-customize documentation](https://libguestfs.org/virt-customize.1.html).
-
-Output is written to `dist/`.
-
-Optional build environment variables:
-
-- `BREAK_GLASS_USER` / `BREAK_GLASS_PASSWORD`: build-time recovery account (random password by default; rotated per VM on first boot)
-- `DASHBOARDS_ZIP_URL`: dashboard bundle location used by the appliance's full update
-- `DISK_SIZE_GB`, `VHD_SUBFORMAT`, `UBUNTU_IMAGE_URL`
-
-## Testing
-
-`testing/` contains the end-to-end test. It deploys a CI-built image to Nutanix AHV unattended, waits for provisioning, then runs on-box, HTTP, collector, console-wizard and maintenance checks. It also lists the manual checks and records past test runs. See [testing/README.md](testing/README.md).

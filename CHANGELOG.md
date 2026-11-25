@@ -32,6 +32,13 @@
 - **An unreachable vCenter looked healthy.** The vSphere plugin only connects on its first collection, after the startup check. Collectors now run a pre-flight check before starting (vCenter reachability and TLS; Prism Element login), so wrong addresses fail in seconds.
 - **Duplicate dashboard title**: the Test Runs dashboard was titled "GO-EUC: Windows Process Analysis"; it's now "GO-EUC: Windows Process Test Runs".
 
+- **Portainer admin never created.** Portainer 2.45 requires a one-time setup token for the first admin, so the installer's request was rejected (403) and Portainer locked itself after 5 minutes ("timed out"). The installer now reads the token from Portainer's log, checks for an existing admin, retries after a restart if needed, and no longer passes the password on the command line.
+- **`config.env` service overrides were ignored** (`INFLUX_ADMIN_ORG`, the admin users/passwords): first boot never passed them to the installer. They're now exported.
+- **SSH password login never worked**, although first boot tried to enable it: the Ubuntu cloud image's `sshd_config.d/60-cloudimg-settings.conf` (`PasswordAuthentication no`) takes precedence over `sshd_config`. A `10-go-euc.conf` drop-in now enables it after the wizard. Appliances from earlier releases only accept SSH keys.
+- **First-boot internet check took ~12 minutes to give up** with an unreachable DNS server (sequential 10 s probes). It now probes in parallel with a 2-minute deadline and shows "Waiting for internet access (attempt N)" on the banner. The banner also shows the configured DNS servers instead of the local stub `127.0.0.53`.
+- **`go-euc-status` flagged collectors after updates and reboots**: it counted the brief write errors while InfluxDB restarts, which Telegraf retries without data loss. Those are now ignored.
+- **Packages installed before the static IP was applied.** First boot installed packages before configuring the network, so on networks without DHCP those installs failed silently. The network is now configured first.
+
 ### Features
 - **Infrastructure collectors**: Telegraf containers on the appliance, each configured from its own landing-page card, managed by `go-euc-collector.sh`, and refreshed by updates:
   - **VMware vSphere**: realtime VM/host metrics every 20 s, historical cluster/datastore/datacenter every 5 min.
@@ -41,9 +48,18 @@
 - **Landing page** reorganised into Services, Infrastructure collectors, Telegraf for Windows, Maintenance, Certificates and an Activity panel.
 - **Windows Telegraf templates** for Nutanix Prism Element and Proxmox VE, alongside the vSphere one.
 - **Unattended deployment**: cloud-init can pre-seed the console wizard's answers (see README, "Unattended deployment").
+- **First-boot internet check**: stops with a clear `FAILED: No internet access` banner, naming the unreachable sites, instead of failing partway through.
+- **`go-euc-status`**: one command for setup state, network, services, containers, collectors, endpoint health, recent errors and log locations.
+- **`go-euc-migrate <old-ip>`**: switch to a new appliance with one command on the new appliance. It copies every InfluxDB bucket over the API (into the new org, keeping the new tokens) and hand-made Grafana dashboards; the old appliance is only read. Guide: `docs/switching-appliances.md`.
+- **`go-euc-change-ip`**: change the static IP after setup (e.g. take over the old appliance's address); refreshes the `config.txt` subnet list, the Telegraf downloads and the banner.
+- **`go-euc-backup.sh` / `go-euc-restore.sh`**: file-based backup and restore of InfluxDB data, collector settings, carry-over settings and optionally Grafana's database.
 - **End-to-end test suite** in `testing/`: unattended Nutanix AHV deployment plus on-box, HTTP, collector, wizard and maintenance checks.
 
 ### Documentation
+- New `docs/switching-appliances.md`: switching from an old to a new appliance (what moves, checklist, steps, same-IP variant, rollback, troubleshooting).
+- New `docs/getting-started.md` for first-time users: requirements (including internet and ports), download, import per hypervisor, setup wizard, first login and the certificate warning, where each password is, next steps, troubleshooting, and moving from an older appliance.
+- New `docs/development.md` (build, CI/release, Terraform, testing), moved out of the README. The README now opens with a "Start here" section.
+- GitHub Release notes link to the getting-started guide.
 - README: credentials and access, landing page, updates and image pins, infrastructure collectors, Proxmox Metric Server, unattended deployment, testing, and the actual release flow (images in Azure Blob, links in GitHub Releases).
 - `Telegraf/WINDOWS_INSTALL.md`: HTTPS downloads with the appliance login, write-only token, TLS behaviour, and the Nutanix and Proxmox templates.
 - `terraform/README.md`: both blob containers and what uses them.

@@ -20,12 +20,17 @@ ensure_sshd_config() {
     return
   fi
 
-  sed -i 's/^[#[:space:]]*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config || true
-  if ! grep -q '^PasswordAuthentication yes' /etc/ssh/sshd_config; then
-    echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
-  fi
-
-  sed -i 's/^[#[:space:]]*KbdInteractiveAuthentication.*/KbdInteractiveAuthentication no/' /etc/ssh/sshd_config || true
+  # sshd uses the FIRST value it reads for each option, and the Ubuntu cloud image ships
+  # /etc/ssh/sshd_config.d/60-cloudimg-settings.conf with "PasswordAuthentication no", which
+  # overrides anything in sshd_config. Our own drop-in sorts first, so it takes effect.
+  mkdir -p /etc/ssh/sshd_config.d
+  cat > /etc/ssh/sshd_config.d/10-go-euc.conf <<'CONF'
+# GO-EUC appliance: password login for goeucadmin and the break-glass account (enabled only
+# after the console wizard has replaced the default password). Keys keep working as well.
+PasswordAuthentication yes
+KbdInteractiveAuthentication no
+CONF
+  chmod 644 /etc/ssh/sshd_config.d/10-go-euc.conf
 }
 
 ensure_host_keys() {

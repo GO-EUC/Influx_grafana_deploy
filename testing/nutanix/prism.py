@@ -3,6 +3,7 @@
 usage:
   python3 prism.py list                 cluster, AHV networks, storage containers, test VMs/images
   python3 prism.py vm <vm-name>         power state and NICs of a VM
+  python3 prism.py poweroff <vm-name>   power the VM off (e.g. the "old" appliance in a switch test)
   python3 prism.py teardown <vm-name>   power off and delete the VM and its "<vm-name>-image" image
 
 Reads $GOEUC_TEST_DIR/nutanix.env (default ~/.goeuc-test). Never prints secrets.
@@ -91,6 +92,12 @@ def cmd_vm(name):
         print(f"{name}: power_state={full.get('power_state')} vcpus={full.get('num_vcpus')} memory_mb={full.get('memory_mb')} nics={nics}")
 
 
+def cmd_poweroff(name):
+    for v in by_name("/vms", name):
+        if v.get("power_state") == "on":
+            wait_task(api("POST", f"/vms/{v['uuid']}/set_power_state", {"transition": "OFF"})["task_uuid"], f"power off {name}")
+
+
 def cmd_teardown(name):
     for v in by_name("/vms", name):
         if v.get("power_state") == "on":
@@ -101,7 +108,7 @@ def cmd_teardown(name):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2 or sys.argv[1] not in ("list", "vm", "teardown"):
+    if len(sys.argv) < 2 or sys.argv[1] not in ("list", "vm", "poweroff", "teardown"):
         sys.exit(__doc__)
     if sys.argv[1] == "list":
         cmd_list()
@@ -109,5 +116,7 @@ if __name__ == "__main__":
         sys.exit(__doc__)
     elif sys.argv[1] == "vm":
         cmd_vm(sys.argv[2])
+    elif sys.argv[1] == "poweroff":
+        cmd_poweroff(sys.argv[2])
     else:
         cmd_teardown(sys.argv[2])

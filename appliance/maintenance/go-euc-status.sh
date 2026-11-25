@@ -59,19 +59,26 @@ fi
 
 section "Infrastructure collectors"
 any=""
+# Count collector errors from the last 10 minutes, but not from the first 2 minutes after
+# InfluxDB (re)started: writes fail briefly while it restarts (updates, reboots) and Telegraf
+# buffers and retries them, so those errors are expected and lose no data.
+since=$(( $(date +%s) - 600 ))
+influx_started="$(date -d "$(docker inspect -f '{{.State.StartedAt}}' influxdb 2>/dev/null)" +%s 2>/dev/null || echo 0)"
+(( influx_started + 120 > since )) && since=$(( influx_started + 120 ))
 for t in vsphere nutanix proxmox; do
   f="/etc/go-euc/collector-${t}.env"
   [[ -f "$f" ]] || continue
   any=1
   enabled="$(grep -q '^COLLECTOR_ENABLED=true$' "$f" && echo enabled || echo stopped)"
   st="$(docker inspect -f '{{.State.Status}}' "telegraf-${t}" 2>/dev/null || echo not-created)"
-  errs="$(docker logs --since 10m "telegraf-${t}" 2>&1 | grep -c ' E! ')"
+  errs=0
+  (( since < $(date +%s) )) && errs="$(docker logs --since "${since}" "telegraf-${t}" 2>&1 | grep -c ' E! ')"
   if [[ "${enabled}" == enabled && "${st}" == running && "${errs}" == 0 ]]; then
-    ok "${t}: running, no errors in the last 10 minutes"
+    ok "${t}: running, no recent errors"
   elif [[ "${enabled}" == stopped ]]; then
     warn "${t}: stopped"
   else
-    bad "${t}: ${enabled}, container ${st}, ${errs} error(s) in 10 min   ->  sudo go-euc-collector.sh ${t} status"
+    bad "${t}: ${enabled}, container ${st}, ${errs} recent error(s)   ->  sudo go-euc-collector.sh ${t} status"
   fi
 done
 [[ -n "${any}" ]] || warn "none configured (landing page > Infrastructure collectors)"

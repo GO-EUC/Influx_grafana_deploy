@@ -11,6 +11,7 @@ Inputs (never printed):
 GOEUC_TEST_DIR defaults to ~/.goeuc-test.
 
 Optional (test scenarios):
+  GOEUC_DEPLOY_IP_CIDR        override APPLIANCE_IP_CIDR (e.g. to run a second test VM)
   GOEUC_DEPLOY_DNS            override APPLIANCE_DNS (e.g. an unreachable resolver to test the
                               first-boot internet check)
   GOEUC_DEPLOY_EXTRA_CONFIG   extra lines appended to config.env (e.g. INFLUX_ADMIN_ORG=GO)
@@ -139,7 +140,7 @@ hostname = VM_NAME[:63]
 config_env = "\n".join([
     "# Written by cloud-init (unattended test deployment) in place of the console wizard.",
     f"APPLIANCE_NAME={shlex.quote(hostname)}",
-    f"APPLIANCE_STATIC_IP_CIDR={shlex.quote(ENV['APPLIANCE_IP_CIDR'])}",
+    f"APPLIANCE_STATIC_IP_CIDR={shlex.quote(os.environ.get('GOEUC_DEPLOY_IP_CIDR') or ENV['APPLIANCE_IP_CIDR'])}",
     f"APPLIANCE_GATEWAY={shlex.quote(ENV['APPLIANCE_GATEWAY'])}",
     f"APPLIANCE_DNS={shlex.quote(os.environ.get('GOEUC_DEPLOY_DNS') or ENV['APPLIANCE_DNS'])}",
     f"APPLIANCE_LOGIN_PASSWORD={shlex.quote(password)}",

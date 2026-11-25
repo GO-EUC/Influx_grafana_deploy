@@ -155,6 +155,9 @@ jobs:
           name: ${{ steps.version.outputs.release_tag }}
           target_commitish: ${{ github.sha }}
           body: |
+            New to the appliance? Start with the getting-started guide: https://github.com/GO-EUC/Influx_grafana_deploy/blob/main/docs/getting-started.md
+            Upgrading? Deploy this release as a new appliance and move your data with go-euc-backup.sh / go-euc-restore.sh (see the guide, "Moving from an older appliance").
+
             Download links:
             - OVA: https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}/${{ steps.files.outputs.ova_name }}
             - OVA checksum: https://${{ vars.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ vars.AZURE_STORAGE_CONTAINER }}/${{ steps.files.outputs.ova_checksum_name }}

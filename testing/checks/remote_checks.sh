@@ -73,6 +73,9 @@ pl="$(python3 -c 'import json,sys; print(json.dumps({"Username": sys.argv[1], "P
 [[ "${pl}" == 200 ]] && ok "Portainer login with saved credentials" || bad "Portainer login -> ${pl}"
 grep -q 'status:   init-failed' /var/log/go-euc-install.log && bad "install log: Portainer init-failed" || ok "install log: Portainer admin initialised"
 
+echo "===== SSH"
+[[ "$(sshd -T 2>/dev/null | awk '/^passwordauthentication/ {print $2}')" == yes ]] && ok "SSH password login enabled (effective sshd config)" || bad "SSH password login disabled in the effective sshd config"
+
 echo "===== go-euc-status"
 if command -v go-euc-status >/dev/null 2>&1; then
   st="$(go-euc-status 2>&1)"

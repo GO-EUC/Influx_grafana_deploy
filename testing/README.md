@@ -19,6 +19,8 @@ It was written to verify the security hardening, the infrastructure collectors (
 | `checks/http_checks.sh` | client | HTTPS redirect, login on the landing page, `/telegraf/` and `/api/`, the `config.txt` subnet rule, proxied services, closed direct ports, API routing and input validation. |
 | `checks/collector_checks.sh` | client | Starts the Nutanix collector against a real Prism Element and checks `nutanix_host` data in InfluxDB. Checks that vSphere and Proxmox fail cleanly against unreachable addresses, and that a blank password keeps the saved one. |
 | `checks/wizard_check.sh` | appliance (root) | Runs a sandboxed copy of the console wizard with scripted answers: validation, `config.env` quoting, marker. |
+| `checks/migrate_checks.sh` | client | Runs `go-euc-migrate <old>` on the new appliance. Checks every old point arrived (across orgs), hand-made dashboards were copied, preloaded ones weren't duplicated, the old appliance is unchanged, and a re-run is harmless. |
+| `checks/backup_restore_checks.sh` | client | Restores a `go-euc-backup.sh` archive from another appliance (`--with-grafana`). Checks every point arrived in the target's own org, collectors restored, Grafana login and data source after the DB restore, and that a second restore is harmless. |
 | `checks/maintenance_checks.sh` | client | Fetch latest Telegraf, **Run Full Appliance Update**, reboot, and every on-box check again. |
 
 Every check prints `PASS`, `FAIL` or `INFO`, and nothing prints passwords or tokens. Secrets are read from files and handed to `curl` through temporary config files, so they never appear on the command line.
@@ -70,11 +72,26 @@ testing/checks/http_checks.sh "$IP" 403     # 403: client NOT on the appliance s
 testing/checks/collector_checks.sh "$IP"
 testing/checks/maintenance_checks.sh "$IP" "$VM"   # long: full update upgrades Ubuntu packages, then reboots
 
+# Moving data: back up a source appliance, restore it onto this one
+$SSH_OLD 'sudo go-euc-backup.sh'      # then copy /var/backups/go-euc/*.tar.gz to the client
+testing/checks/backup_restore_checks.sh "$IP" ./go-euc-backup-<host>-<time>.tar.gz
+
 # 4. Clean up (or keep the VM to look around)
 python3 testing/nutanix/prism.py teardown "$VM"
 ```
 
 The appliance login for the landing page is `goeucadmin` with the password in `~/.goeuc-test/goeucadmin.password`.
+
+## Scenarios
+
+`deploy.py` options for testing behaviour that a default deployment doesn't exercise:
+
+| Scenario | How | Expected |
+|---|---|---|
+| Non-default InfluxDB org (e.g. the GO-EUC lab's `GO`) | `GOEUC_DEPLOY_EXTRA_CONFIG='INFLUX_ADMIN_ORG=GO' python3 testing/nutanix/deploy.py ...` | Provisioning completes; `SAVED_INFLUX_ADMIN_ORG=GO`; every check passes |
+| Switching appliances (new IP) | Deploy a second appliance with `GOEUC_DEPLOY_IP_CIDR`, then `testing/checks/migrate_checks.sh <new-ip> <old-ip>` | 9/9 pass; data and hand-made dashboards on the new appliance |
+| Switching appliances (same IP) | After the migration: `python3 testing/nutanix/prism.py poweroff <old-vm>`, then on the new appliance `sudo go-euc-change-ip <old-ip>/<prefix>`; then `http_checks.sh <old-ip>` | New appliance answers on the old address; subnet list, Telegraf downloads and `config.txt` show the new address |
+| No internet access during first boot | `GOEUC_DEPLOY_DNS=192.0.2.53 python3 testing/nutanix/deploy.py ...` (unreachable DNS server) | `wait_for_provisioning.sh` reports `FAILED`; the banner says `No internet access: cannot reach ...`; nothing was installed (`go-euc-status` shows docker missing) |
 
 ## Manual checks
 

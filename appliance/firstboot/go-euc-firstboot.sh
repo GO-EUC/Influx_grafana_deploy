@@ -49,7 +49,9 @@ get_runtime_network_details() {
   RUNTIME_IFACE="$(ip route 2>/dev/null | awk '/^default/ {print $5; exit}')"
   RUNTIME_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
   RUNTIME_GATEWAY="$(ip route 2>/dev/null | awk '/^default/ {print $3; exit}')"
-  RUNTIME_DNS="$(awk '/^nameserver/ {print $2}' /etc/resolv.conf 2>/dev/null | paste -sd',' -)"
+  # The configured (upstream) DNS servers; /etc/resolv.conf only shows the local stub 127.0.0.53.
+  RUNTIME_DNS="$(resolvectl dns 2>/dev/null | awk -F': ' 'NF>1 && $2 != "" {print $2}' | tr ' ' '\n' | grep -v '^$' | sort -u | paste -sd',' -)"
+  [[ -n "${RUNTIME_DNS}" ]] || RUNTIME_DNS="$(awk '/^nameserver/ {print $2}' /etc/resolv.conf 2>/dev/null | paste -sd',' -)"
 
   [[ -n "${RUNTIME_IFACE}" ]] || RUNTIME_IFACE="<unknown>"
   [[ -n "${RUNTIME_IP}" ]] || RUNTIME_IP="<unknown>"
@@ -236,15 +238,18 @@ configure_ssh_access() {
     return 0
   fi
 
-  # Ensure password-based SSH works for break-glass and appliance users.
-  sed -i 's/^[#[:space:]]*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config || true
-  if ! grep -q '^PasswordAuthentication yes' /etc/ssh/sshd_config; then
-    echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
-  fi
-  sed -i 's/^[#[:space:]]*KbdInteractiveAuthentication.*/KbdInteractiveAuthentication yes/' /etc/ssh/sshd_config || true
-  if ! grep -q '^UsePAM yes' /etc/ssh/sshd_config; then
-    echo 'UsePAM yes' >> /etc/ssh/sshd_config
-  fi
+  # Password-based SSH for break-glass and appliance users (runs after the console wizard).
+  # sshd uses the FIRST value it reads for each option, and the Ubuntu cloud image ships
+  # /etc/ssh/sshd_config.d/60-cloudimg-settings.conf with "PasswordAuthentication no", which
+  # overrides anything in sshd_config. Our own drop-in sorts first, so it takes effect.
+  mkdir -p /etc/ssh/sshd_config.d
+  cat > /etc/ssh/sshd_config.d/10-go-euc.conf <<'CONF'
+# GO-EUC appliance: password login for goeucadmin and the break-glass account (enabled only
+# after the console wizard has replaced the default password). Keys keep working as well.
+PasswordAuthentication yes
+KbdInteractiveAuthentication no
+CONF
+  chmod 644 /etc/ssh/sshd_config.d/10-go-euc.conf
 
   # Ensure host keys exist so sshd can start.
   mkdir -p /etc/ssh
@@ -575,36 +580,54 @@ OPTIONAL_SITES=(
 )
 
 # Fail fast with a clear console message when the appliance has no internet access, instead
-# of failing partway through the Docker installation. Retries for up to ~2 minutes while the
-# network settles. Any HTTP answer (even 401/404) counts as reachable.
-check_internet_access() {
-  local site=""
-  local code=""
-  local failed=()
-  local attempt
+# of failing partway through the Docker installation. Retries for up to 2 minutes while the
+# network settles, showing progress on the console banner. Sites are probed in parallel with
+# short timeouts, so even with an unreachable DNS server each attempt takes ~8 seconds.
+# Any HTTP answer (even 401/404) counts as reachable.
+probe_sites() {
+  # Prints the unreachable sites (scheme://host), one per line.
+  local dir="" site="" i=0
+  dir="$(mktemp -d)"
+  for site in "$@"; do
+    ( curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 8 "${site}" > "${dir}/${i}" 2>/dev/null || true ) &
+    i=$((i + 1))
+  done
+  wait
+  i=0
+  for site in "$@"; do
+    [[ "$(cat "${dir}/${i}" 2>/dev/null)" =~ ^[1-5][0-9][0-9]$ ]] || echo "$(cut -d/ -f1-3 <<<"${site}")"
+    i=$((i + 1))
+  done
+  rm -rf "${dir}"
+}
 
-  for attempt in $(seq 1 12); do
-    failed=()
-    for site in "${REQUIRED_SITES[@]}"; do
-      code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "${site}" 2>/dev/null || true)"
-      [[ "${code}" =~ ^[1-5][0-9][0-9]$ ]] || failed+=("${site%%/*}//$(cut -d/ -f3 <<<"${site}")")
-    done
-    [[ "${#failed[@]}" -eq 0 ]] && break
-    echo "[firstboot] Internet check attempt ${attempt}: unreachable: ${failed[*]}"
+check_internet_access() {
+  local deadline=$(( $(date +%s) + 120 ))
+  local attempt=0
+  local failed=""
+  local site=""
+
+  while :; do
+    attempt=$((attempt + 1))
+    failed="$(probe_sites "${REQUIRED_SITES[@]}" | tr '\n' ' ' | sed 's/ $//')"
+    [[ -z "${failed}" ]] && break
+    echo "[firstboot] Internet check attempt ${attempt}: unreachable: ${failed}"
+    (( $(date +%s) >= deadline )) && break
+    write_issue_status "INITIALIZING" "Waiting for internet access (attempt ${attempt}, up to 2 minutes): cannot reach ${failed}"
     sleep 10
   done
 
-  if [[ "${#failed[@]}" -gt 0 ]]; then
+  if [[ -n "${failed}" ]]; then
     get_runtime_network_details
-    write_issue_status "FAILED" "No internet access: cannot reach ${failed[*]}. First boot needs outbound HTTP/HTTPS (Ubuntu mirrors, Docker). Check gateway ${RUNTIME_GATEWAY}, DNS ${RUNTIME_DNS} and firewall/proxy rules, then reboot to retry (setup resumes automatically)."
-    echo "[firstboot] ERROR: no internet access (${failed[*]}); stopping before installation."
+    write_issue_status "FAILED" "No internet access: cannot reach ${failed}. First boot needs outbound HTTP/HTTPS (Ubuntu mirrors, Docker). Check gateway ${RUNTIME_GATEWAY}, DNS ${RUNTIME_DNS} and firewall/proxy rules, then reboot to retry (setup resumes automatically)."
+    echo "[firstboot] ERROR: no internet access (${failed}); stopping before installation."
     exit 1
   fi
   echo "[firstboot] Internet check passed."
+  write_issue_status "INITIALIZING" "Monitoring services setup is running. This can take 10-20 minutes."
 
-  for site in "${OPTIONAL_SITES[@]}"; do
-    code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "${site}" 2>/dev/null || true)"
-    [[ "${code}" =~ ^[1-5][0-9][0-9]$ ]] || echo "[firstboot] WARN: optional site unreachable: ${site} (Telegraf package download will fail until it is reachable)."
+  for site in $(probe_sites "${OPTIONAL_SITES[@]}"); do
+    echo "[firstboot] WARN: optional site unreachable: ${site} (Telegraf package download will fail until it is reachable)."
   done
 }
 
