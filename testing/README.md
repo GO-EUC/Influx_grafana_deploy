@@ -148,6 +148,38 @@ Found and fixed during run 2, verified on the running appliance (hot-patched), a
 - **An unreachable vCenter looked healthy.** The vSphere plugin only connects on its first collection, after the 45 s startup check. Collectors now run a pre-flight check (vCenter reachability and TLS; Prism Element login). The unreachable vCenter now fails in seconds with "Cannot reach ... collector not started".
 - **Test-only:** the full update correctly switched Grafana to the *published* bundle (`files/Dashboards.zip`, dated 2026-03-28: Analyzing, Comparing New, Troubleshooting). The dashboard check now compares Grafana with the bundle files actually on disk, not a fixed count of 6.
 
+### 2026-11-25 run 3: build `20261125-155700-ea4ae295` (commit `ea4ae29`): passed after fixes
+
+- VM #3, `INFLUX_ADMIN_ORG=GO`: provisioned in 129 s with org `GO`. On-box 88/88, HTTP 49/49, wizard 8/8, collectors 18/18. Restoring VM #2's backup (org `monitoring`) passed 11/11. Full update and reboot passed, and on-box was 88/88 afterwards (after the `go-euc-status` fix below).
+- VM #4, unreachable DNS server: the banner showed `FAILED: No internet access: cannot reach …` and nothing was installed. After fixing the DNS in `config.env` and rebooting, setup resumed and completed by itself.
+
+Found and fixed:
+
+| Finding | Fix |
+|---|---|
+| **Portainer admin never created**: Portainer 2.45 requires a one-time setup token (403), then locks itself after 5 minutes. Run 2's HTTP check passed only because it ran inside that window. | Installer reads `setup_token=` from Portainer's log; checks for an existing admin; retries after a restart. Regression checks added. |
+| **SSH password login never worked**: the cloud image's `60-cloudimg-settings.conf` overrides `sshd_config`. | `10-go-euc.conf` drop-in; check of the effective `sshd -T` setting. |
+| Internet check took ~12.5 minutes to give up (sequential 10 s probes × 12 attempts); banner showed DNS `127.0.0.53`. | Parallel probes, 2-minute deadline, progress on the banner, real DNS servers. |
+| `go-euc-status` flagged the collector after an update: transient write errors while InfluxDB restarted. | Errors in the 2 minutes after InfluxDB starts are ignored (Telegraf retries them). |
+| `go-euc-migrate` restored nothing: `influx restore --org` is the *original* org. | `--org <old> --new-org <new>`. |
+
+Switching tests (VM #3 as old at `.130`, org `GO`; VM #4 as new at `.131`, org `monitoring`): `migrate_checks.sh` passed 9/9 (all points, the hand-made dashboard, old appliance unchanged, re-run harmless). Then VM #3 was powered off, and `go-euc-change-ip 192.168.102.130/24` moved VM #4 onto the old address, with the subnet list, Telegraf downloads, `config.txt` and banner updated. HTTP was 49/49 at the new address.
+
+### 2026-11-25 run 4: build `20261125-162413-e75d1ce5` (commit `e75d1ce`): passed
+
+Fresh VM #5 (`.131`), provisioned in 129 s.
+
+| Suite | Result |
+|-------|--------|
+| `remote_checks.sh` | 89 passed, 0 failed (incl. SSH password login, Portainer admin, `go-euc-status`) |
+| SSH password login from a client (no key) | OK |
+| `http_checks.sh` | 49 passed, 0 failed |
+| `wizard_check.sh` | 8 passed, 0 failed |
+| `collector_checks.sh` | 18 passed, 0 failed |
+| `migrate_checks.sh` (old = VM #4, previous build `ea4ae295`) | 9 passed, 0 failed |
+| `maintenance_checks.sh` | update (75 s) and reboot passed; on-box after reboot 89/89 (after counting only file-provisioned dashboards: migrated ones live alongside them) |
+
 Open items:
 - **Dashboard bundles differ.** The published bundle has a *Troubleshooting* dashboard that the repo's `Dashboards.zip` lacks, and the repo has 4 dashboards the published bundle lacks. `main` builds publish the repo bundle, so add Troubleshooting to the repo before merging, or appliances will lose it on their next full update.
+- **Switching from appliances built before November 2026** (InfluxDB on `http://<old>:8086`, token in the old `config.txt`'s Telegraf section) is implemented but not yet tested on a real old appliance.
 - Not covered by this environment: the manual checks above (real console wizard, browser walkthrough, `config.txt` from the appliance subnet, Windows client, real vCenter / Proxmox VE, Proxmox Metric Server push, Let's Encrypt).

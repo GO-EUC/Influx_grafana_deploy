@@ -113,7 +113,19 @@ dh="$(gf /api/datasources/uid/DS_GO/health | python3 -c 'import json,sys; print(
 # Every dashboard file in the provisioned bundle must be loaded, with unique titles. The bundle is
 # the repo's Dashboards.zip after first boot, or the published one after a full update.
 files="$(find /opt/influx-grafana/stack/grafana/dashboards -name '*.json' | wc -l | tr -d ' ')"
-n="$(gf '/api/search?type=dash-db' | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d), len({x["title"] for x in d}))' 2>/dev/null)"
+# Count only file-provisioned dashboards (hand-made or migrated ones live alongside them).
+n="$(python3 - "${SAVED_GRAFANA_ADMIN_USER}" "${SAVED_GRAFANA_ADMIN_PASSWORD}" <<'PY' 2>/dev/null
+import base64, json, sys, urllib.request
+auth = "Basic " + base64.b64encode(f"{sys.argv[1]}:{sys.argv[2]}".encode()).decode()
+def get(path):
+    req = urllib.request.Request("http://127.0.0.1:3000/grafana" + path, headers={"Authorization": auth})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return json.load(r)
+prov = [d["title"] for d in get("/api/search?type=dash-db&limit=5000")
+        if get(f"/api/dashboards/uid/{d['uid']}").get("meta", {}).get("provisioned")]
+print(len(prov), len(set(prov)))
+PY
+)"
 [[ "${n}" == "${files} ${files}" && "${files}" -gt 0 ]] && ok "${files} dashboard files -> ${files} dashboards provisioned, titles unique" || bad "dashboard files ${files}; provisioned / unique titles: ${n}"
 c="$(docker logs grafana 2>&1 | grep -c 'failed to save dashboard')"
 [[ "${c}" == 0 ]] && ok "no Grafana dashboard provisioning errors" || bad "Grafana logged ${c} 'failed to save dashboard' error(s)"
