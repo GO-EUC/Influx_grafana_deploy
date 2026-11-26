@@ -208,3 +208,19 @@ Found during development, before this build: `go-euc-set-ports` didn't update `H
 Open items:
 - Grafana's own URL is `http://localhost/grafana/` (`GF_SERVER_ROOT_URL` with the default domain). Navigation uses relative paths and works everywhere, but links Grafana generates (*Share → Copy link*, alert notifications) show `localhost`. **Fixed afterwards** (`go-euc-grafana-url.sh`): with an active Let's Encrypt certificate or a public host name (`go-euc-set-hostname`), Grafana uses that name. With the scripts hot-patched on this appliance, `public_address_checks.sh` passed 66/66, and on-box 90/90, HTTP 58/58, ports 49/49 and public 24/24 again afterwards. With the real public name set, Grafana served `appUrl` `https://<public-name>/grafana/` through the proxy.
 - The landing page's InfluxDB tile links to `:8086`, which isn't reachable through a public name or reverse proxy. Expected and documented; the InfluxDB API works through `/influx` and `/api/v2`.
+
+### 2026-11-26 run 6: build `20261125-233602-2d50183f` (commit `2d50183`): passed
+
+Public host name override, one-to-one alternative ports, Grafana's URL from the public address, and the GO-EUC-branded landing page. Fresh VM #7 (`.130`), behind the same reverse proxy as run 5.
+
+| Suite | Result |
+|-------|--------|
+| `remote_checks.sh` | 90 passed, 0 failed |
+| `wizard_check.sh` | 8 passed, 0 failed |
+| `public_address_checks.sh` | 66 passed, 0 failed (host name override via CLI and API, with and without a port, alternative ports, invalid values refused; simulated Let's Encrypt with the real deploy hook; both together; restored) |
+| `http_checks.sh` | 59 passed, 0 failed, both before and after setting the public host name |
+| `ports_checks.sh` | 49 passed, 0 failed |
+| `collector_checks.sh` | 18 passed, 0 failed |
+| `public_checks.sh <public-name> <ip>` | 24 passed, 0 failed, with the public host name set; Grafana served `appUrl` `https://<public-name>/grafana/` |
+
+The branded landing page, its logo and favicon (`/assets/`, behind the appliance login) were served through the public name. One SSH session hung before the first suite started; the suites were re-run with `ServerAliveInterval` and a time limit, and all passed.
