@@ -17,6 +17,7 @@ This repository builds and publishes the GO-EUC virtual appliance as an OVA (VMw
 - **New to the appliance?** Follow [docs/getting-started.md](docs/getting-started.md): requirements, download, import on VMware, Hyper-V, Nutanix or Proxmox, setup, first login, next steps and troubleshooting.
 - **Download:** [Releases](https://github.com/GO-EUC/Influx_grafana_deploy/releases), with OVA (VMware) and VHD (Hyper-V, Nutanix AHV, Proxmox VE/KVM) links and checksums in each release.
 - **How it fits together:** [docs/architecture.md](docs/architecture.md): ports, request routing, data flow, and what to forward on a router.
+- **Running GO-EUC research (benchmarkle) from the appliance:** [docs/testing-with-benchmarkle.md](docs/testing-with-benchmarkle.md): your GitHub environment, Azure setup and research runs, from the landing page's Testing section.
 - **Reaching it from the internet:** [docs/external-access.md](docs/external-access.md): DNS, port forwarding (direct, through a reverse proxy you already run, or on the alternative ports 8080/4443), Let's Encrypt.
 - **Something not working?** Run `sudo go-euc-status` on the appliance; see [Troubleshooting](docs/getting-started.md#8-troubleshooting).
 - **Moving to a new release?** Follow [docs/switching-appliances.md](docs/switching-appliances.md): deploy the new appliance, run `sudo go-euc-migrate <old-ip>` on it, switch clients over, switch the old one off.
@@ -51,6 +52,7 @@ The appliance is built from Ubuntu Noble cloud image and includes:
   - `go-euc-change-ip` (change the static IP address after setup, e.g. to take over an old appliance's address)
   - `go-euc-set-ports` (web server on the standard ports 80/443 or the alternative 8080/4443)
   - `go-euc-set-hostname` (public host name clients are given, with or without a Let's Encrypt certificate)
+  - `go-euc-benchmarkle` (the Testing section's backend: GitHub environment, Azure setup, research runs) and `go-euc-install-test-tools.sh` (PowerShell, Azure CLI, GitHub CLI)
   - `go-euc-backup.sh` / `go-euc-restore.sh` (file-based backup and restore)
 - credential and status output (all root-only, mode 600):
   - `/opt/influx-grafana/credentials.env`
@@ -147,6 +149,7 @@ On Nutanix AHV, pass this as the VM's guest customization (cloud-init); on VMwar
 - **Services**: Grafana, InfluxDB, Portainer, GO-EUC Web and `config.txt`
 - **Infrastructure collectors**: one card each for VMware vSphere, Nutanix Prism Element and Proxmox VE (see [Infrastructure collectors](#infrastructure-collectors-vsphere-nutanix-proxmox-ve))
 - **Telegraf for Windows**: downloads, the install guide, and **Fetch latest Telegraf package**
+- **Testing**: Anthropic API key, GitHub access, your benchmarkle environment, Azure sign-in and `Setup.ps1`, and research runs (see [docs/testing-with-benchmarkle.md](docs/testing-with-benchmarkle.md))
 - **Maintenance**: **Run Full Appliance Update**, **Public host name** (the name clients are given) and **Web ports** (standard 80/443 or alternative 8080/4443)
 - **Certificates**: Let's Encrypt setup and **Renew Let's Encrypt Certificate**
 - **Activity**: the output of every action on the page

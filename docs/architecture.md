@@ -135,6 +135,25 @@ flowchart LR
 | Telegraf write-only token | write `Performance` | Windows Telegraf configs (`/telegraf/`), infrastructure collectors |
 | Proxmox write-only token | write `Proxmox` | Proxmox VE Metric Server |
 
+## Testing with benchmarkle
+
+The landing page's Testing section ([guide](testing-with-benchmarkle.md)) prepares and starts GO-EUC research; GitHub Actions and Azure do the work, and the results come back into the appliance's InfluxDB over its public address.
+
+```mermaid
+flowchart LR
+    subgraph app["GO-EUC appliance"]
+        page["Landing page<br/>Testing"] --> backend["go-euc-benchmarkle<br/>(gh, az, pwsh)"]
+        nginx2["nginx<br/>public address :443"] --> influx2[("InfluxDB<br/>Tests / Performance / OBUX")]
+    end
+    backend -- "environment, secrets, variables;<br/>start Research" --> gh["GitHub<br/>GO-EUC/benchmarkle"]
+    backend -- "device sign-in;<br/>Setup.ps1" --> azure["Azure subscription<br/>identity, state storage"]
+    gh -- "runners: Terraform, Ansible" --> vms["Azure test VMs<br/>OBUX + Telegraf"]
+    gh -- "markers, analysis<br/>(INFLUX_URL, token)" --> nginx2
+    vms -- "OBUX results, metrics" --> nginx2
+```
+
+Secrets stay out of command lines: the GitHub token and the Azure sign-in are root-only on the appliance, environment secrets are set through `gh` on standard input, and the InfluxDB token in the environment can only read and write the three test buckets.
+
 ## Reaching the appliance from outside your network (port forwarding)
 
 By default the appliance is meant for a lab network, and nothing needs to be forwarded. To reach it from the internet (Let's Encrypt, cloud test machines, Grafana from outside), there are three setups. [External access](external-access.md) walks through each one.
@@ -175,6 +194,10 @@ Things to know before forwarding:
 | `api.github.com`, `github.com`, `dl.influxdata.com` | 443 | Telegraf for Windows download |
 | Azure Blob (`goeucartifacts4hiu9i.blob.core.windows.net`) | 443 | dashboard bundle updates |
 | `acme-v02.api.letsencrypt.org` | 443 | Let's Encrypt |
+| `packages.microsoft.com`, `cli.github.com` | 443 | PowerShell, Azure CLI and GitHub CLI packages (first boot, full update) |
+| `api.github.com`, `github.com` | 443 | Testing: your benchmarkle environment, research runs |
+| `login.microsoftonline.com`, `login.microsoft.com`, `management.azure.com`, `graph.microsoft.com` | 443 | Testing: Azure sign-in and `Setup.ps1` |
+| `api.anthropic.com` | 443 | Testing: checking the Anthropic API key |
 | vCenter / Prism Element / Proxmox VE | 443 / 9440 / 8006 | infrastructure collectors |
 | Old appliance | 8086 (+ its web port for `config.txt` and Grafana) | `go-euc-migrate` |
 

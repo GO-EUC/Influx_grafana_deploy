@@ -411,6 +411,13 @@ echo \
 echo "==> Installing Docker Engine and Compose plugin"
 apt-get update -y
 apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+# Tools for the landing page's Testing section (PowerShell, Azure CLI, GitHub CLI). Not required for
+# the rest of the appliance: a failure is reported and the next full update tries again.
+if [[ -x /usr/local/bin/go-euc-install-test-tools.sh ]]; then
+  /usr/local/bin/go-euc-install-test-tools.sh \
+    || echo "[install] WARN: Testing tools (pwsh, az, gh) not installed; Run Full Appliance Update retries." >&2
+fi
 systemctl enable docker
 systemctl start docker
 

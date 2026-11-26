@@ -423,6 +423,10 @@ Bucket=Proxmox
 Token=${saved_proxmox_token}
 TokenScope=write-only (Proxmox bucket)
 EOF
+  # Anthropic API key (landing page > Testing), when one was saved.
+  if [[ -n "${SAVED_ANTHROPIC_API_KEY:-}" ]]; then
+    printf '\nAnthropic\nApiKey=%s\n' "${SAVED_ANTHROPIC_API_KEY}" >> "${PUBLIC_CONFIG_FILE}"
+  fi
   # Contains every appliance credential: readable by root and the nginx container's workers only.
   chown "root:${NGINX_CONTAINER_GID}" "${PUBLIC_CONFIG_FILE}"
   chmod 640 "${PUBLIC_CONFIG_FILE}"
@@ -1104,6 +1108,9 @@ EOF
     input[type=radio], input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; }
     input[type=text], input[type=email], input[type=password] { width: 100%; padding: 14px 16px; font-family: var(--font); font-size: 15px; font-weight: 500;
       color: var(--text); background: var(--bg-deep); border: 2px solid transparent; border-radius: 8px; outline: none; transition: border-color .2s ease-in-out; }
+    select { width: 100%; padding: 14px 16px; font-family: var(--font); font-size: 15px; font-weight: 500; color: var(--text);
+             background: var(--bg-deep); border: 2px solid transparent; border-radius: 8px; outline: none; }
+    select:focus { border-color: var(--accent); }
     input::placeholder { color: #777; }
     input:focus { border-color: var(--accent); }
     button { font-family: var(--font); padding: 14px 24px; font-size: 14px; font-weight: 700; line-height: 1; cursor: pointer; border: none; border-radius: 8px;
@@ -1147,6 +1154,7 @@ EOF
         <a href="#services">Services</a>
         <a href="#collectors">Collectors</a>
         <a href="#telegraf">Telegraf</a>
+        <a href="#testing">Testing</a>
         <a href="#maintenance">Maintenance</a>
         <a href="#certificates">Certificates</a>
         <a href="#activity">Activity</a>
@@ -1269,6 +1277,90 @@ pveum acl modify / -role PVEAuditor -token 'telegraf@pve!monitoring'</pre>
           <h3>Telegraf package</h3>
           <p>Download the latest Telegraf Windows x64 release into <code>/telegraf/</code>.</p>
           <button id="refreshBtn" type="button">Fetch latest Telegraf package</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="testing">
+      <h2>Testing</h2>
+      <p class="lead">Run GO-EUC research with <a href="https://github.com/GO-EUC/benchmarkle" target="_blank" rel="noopener">benchmarkle</a>: short-lived Windows VMs in your Azure subscription run the OBUX benchmark, and the results land in this appliance's InfluxDB. GitHub Actions does the work; this appliance sets up your environment and starts the runs. It must be reachable from the internet with a trusted certificate (see <em>Public host name</em> and <em>Certificates</em>). <span id="bmTools"></span></p>
+      <div class="grid wide">
+        <div class="card">
+          <h3>Anthropic API key <span id="anthropicBadge" class="badge">checking...</span></h3>
+          <p>Used by the analysis after each research (conclusion and website charts) as the <code>ANTHROPIC_API_KEY</code> secret of your environment. Stored on the appliance and listed in <code>config.txt</code>.</p>
+          <form id="anthropicForm">
+            <label for="anthropicKey">API key</label>
+            <input id="anthropicKey" name="key" type="password" autocomplete="off" placeholder="sk-ant-...">
+            <button class="primary" type="submit">Save key</button>
+            <button id="anthropicClearBtn" type="button">Remove</button>
+          </form>
+        </div>
+        <div class="card">
+          <h3>GitHub access <span id="githubBadge" class="badge">checking...</span></h3>
+          <p>A token that lets the appliance create your environment and start workflows in <code id="bmRepo">GO-EUC/benchmarkle</code>. Stored root-only on the appliance.</p>
+          <form id="githubForm">
+            <label for="githubToken">Fine-grained personal access token</label>
+            <input id="githubToken" name="token" type="password" autocomplete="off" placeholder="github_pat_...">
+            <button class="primary" type="submit">Save token</button>
+            <button id="githubClearBtn" type="button">Remove</button>
+          </form>
+          <details>
+            <summary>Create the token</summary>
+            <p><a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">New fine-grained token</a>: resource owner <strong>GO-EUC</strong>, repository access <strong>Only select repositories &rarr; benchmarkle</strong>, and these repository permissions:</p>
+            <table class="kv">
+              <tr><td>Actions</td><td>Read and write (start runs)</td></tr>
+              <tr><td>Administration</td><td>Read and write (create the environment)</td></tr>
+              <tr><td>Contents</td><td>Read-only (research files)</td></tr>
+              <tr><td>Environments</td><td>Read and write (environment secrets and variables)</td></tr>
+              <tr><td>Secrets / Variables</td><td>Read and write</td></tr>
+            </table>
+            <p class="hint">Your account needs admin on the repository. If the organisation reviews fine-grained tokens, an owner approves it first.</p>
+          </details>
+        </div>
+        <div class="card">
+          <h3>1. Your environment <span id="envBadge" class="badge">not set up</span></h3>
+          <p>Creates the GitHub environment named after you, with this appliance's InfluxDB address (<code id="bmInfluxUrl">...</code>), a token for its Tests, Performance and OBUX buckets, and the Anthropic key. Run it again after changing the key or the public host name.</p>
+          <form id="envForm">
+            <label for="bmName">Your full name</label>
+            <input id="bmName" name="name" type="text" placeholder="Jane Doe">
+            <label for="bmObuxEmail">OBUX contact email (optional)</label>
+            <input id="bmObuxEmail" name="obux_email" type="email" placeholder="you@example.com">
+            <button class="primary" type="submit">Set up environment</button>
+          </form>
+          <div class="hint" id="envInfo"></div>
+        </div>
+        <div class="card">
+          <h3>2. Azure <span id="azureBadge" class="badge">checking...</span></h3>
+          <p>Signs in to Azure here, then runs benchmarkle's <code>Setup.ps1</code>: Terraform state storage, a managed identity that GitHub uses for your runs, its roles, and the Azure variables of your environment. Needs Owner (or User Access Administrator) on the subscription.</p>
+          <div id="azureSignIn">
+            <label for="azTenant">Tenant (optional: ID or domain)</label>
+            <input id="azTenant" type="text" placeholder="contoso.onmicrosoft.com">
+            <button id="azLoginBtn" type="button">Sign in to Azure</button>
+            <button id="azCancelBtn" type="button">Cancel</button>
+          </div>
+          <div id="azDevice" class="hint" hidden></div>
+          <div id="azureSetup" hidden>
+            <label for="azSubscription">Subscription</label>
+            <select id="azSubscription"></select>
+            <label for="azLocation">Region for the state storage and identity</label>
+            <input id="azLocation" type="text" value="westeurope">
+            <button id="azSetupBtn" class="primary" type="button">Run Setup.ps1</button>
+          </div>
+          <pre id="azLog" hidden></pre>
+        </div>
+        <div class="card">
+          <h3>3. Run a research</h3>
+          <p>Starts the Research workflow in your environment. Every scenario is deployed, benchmarked and destroyed; results appear in Grafana. <strong>A real run creates Azure VMs and costs money.</strong></p>
+          <label for="bmResearch">Research</label>
+          <select id="bmResearch"><option value="">(add GitHub access first)</option></select>
+          <div class="hint" id="bmResearchInfo"></div>
+          <label class="check"><input type="checkbox" id="bmValidateOnly" checked> Validate only (no Azure resources, no cost)</label>
+          <label class="check"><input type="checkbox" id="bmAnalyse" checked> Analyse afterwards (statistics, and with the Anthropic key a conclusion and charts)</label>
+          <button id="bmRunBtn" class="primary" type="button">Start</button>
+          <details open>
+            <summary>Recent runs <a href="#" id="bmRunsRefresh" style="font-weight:500;margin-left:8px">refresh</a></summary>
+            <table class="kv" id="bmRuns"></table>
+          </details>
         </div>
       </div>
     </section>
@@ -1484,6 +1576,177 @@ pveum acl modify / -role PVEAuditor -token 'telegraf@pve!monitoring'</pre>
       saveHostname(event.target.elements.hostname.value.trim());
     });
     document.getElementById('hostnameClearBtn').addEventListener('click', () => saveHostname(''));
+
+    // Testing (GO-EUC/benchmarkle).
+    const bm = {
+      status: null, research: [], pollTimer: null,
+      async get(path) { const r = await fetch('/api/benchmarkle/' + path, { cache: 'no-store' }); return r.json(); },
+      post(path, body, start, done) {
+        return runAction(start, '/api/benchmarkle/' + path, {
+          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {})
+        }, (res, payload) => payload.message || (res.ok ? done : 'The step returned an error.'));
+      }
+    };
+    function bmText(id, text) { document.getElementById(id).textContent = text; }
+
+    async function loadTesting() {
+      let s;
+      try { s = await bm.get('status'); } catch (err) { setBadge(document.getElementById('githubBadge'), 'unavailable', 'err'); return; }
+      bm.status = s;
+      const t = s.tools || {};
+      bmText('bmTools', `Tools: PowerShell ${t.pwsh || 'missing'}, Azure CLI ${t.az || 'missing'}, GitHub CLI ${t.gh || 'missing'}.`);
+      bmText('bmRepo', s.repo + (s.ref && s.ref !== 'main' ? ` (${s.ref})` : ''));
+      setBadge(document.getElementById('anthropicBadge'), s.anthropic.configured ? `saved ${s.anthropic.hint}` : 'not set', s.anthropic.configured ? 'ok' : '');
+      setBadge(document.getElementById('githubBadge'), s.github.configured ? `signed in as ${s.github.login || '?'}` : 'not set', s.github.configured ? 'ok' : '');
+      const env = s.environment;
+      setBadge(document.getElementById('envBadge'), env.slug ? env.slug : 'not set up', env.slug ? 'ok' : '');
+      if (env.name && !document.getElementById('bmName').value) document.getElementById('bmName').value = env.name;
+      if (env.obux_email && !document.getElementById('bmObuxEmail').value) document.getElementById('bmObuxEmail').value = env.obux_email;
+      const pub = s.public;
+      bmText('bmInfluxUrl', pub.source === 'ip' ? 'no public address yet' : pub.base_url);
+      document.getElementById('envInfo').textContent = env.slug
+        ? `Environment ${env.slug} set up ${env.set_up}. ` + (pub.source === 'ip' ? 'Set a public host name first.' : '')
+        : (pub.source === 'ip' ? 'Set Maintenance > Public host name first: runners and test VMs reach InfluxDB over the internet.' : '');
+
+      const az = s.azure;
+      const login = az.login.state, setup = az.setup.state;
+      let badge = 'not signed in', kind = '';
+      if (az.account) { badge = `${az.account.user} \u00b7 ${az.account.subscription}`; kind = 'ok'; }
+      if (login === 'running') { badge = 'signing in...'; kind = ''; }
+      if (setup === 'running') { badge = 'Setup.ps1 running...'; kind = ''; }
+      if (setup === 'failed') { badge = 'Setup.ps1 failed'; kind = 'err'; }
+      if (setup === 'succeeded' && az.account) { badge = 'set up'; kind = 'ok'; }
+      setBadge(document.getElementById('azureBadge'), badge, kind);
+      const device = document.getElementById('azDevice');
+      if (az.device) {
+        device.hidden = false;
+        device.innerHTML = '';
+        device.append('Open ');
+        const a = document.createElement('a'); a.href = az.device.url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = az.device.url;
+        device.append(a, ' and enter the code ');
+        const code = document.createElement('code'); code.textContent = az.device.code; code.style.fontSize = '1.4em';
+        device.append(code, '. This page continues when you have signed in.');
+      } else {
+        device.hidden = login !== 'failed';
+        if (login === 'failed') device.textContent = 'Sign-in failed or expired: ' + (az.login.log || '').split('\n').slice(-2).join(' ');
+      }
+      document.getElementById('azureSetup').hidden = !az.account || login === 'running';
+      if (az.account && !document.getElementById('azSubscription').options.length) loadSubscriptions(az.account.subscription_id);
+      const log = document.getElementById('azLog');
+      log.hidden = setup === 'none';
+      if (setup !== 'none') { log.textContent = az.setup.log || '(starting...)'; log.scrollTop = log.scrollHeight; }
+
+      const running = login === 'running' || setup === 'running';
+      clearTimeout(bm.pollTimer);
+      if (running) bm.pollTimer = setTimeout(loadTesting, 4000);
+      if (s.github.configured && !bm.research.length) loadResearch();
+      if (env.slug) loadRuns();
+    }
+
+    async function loadSubscriptions(current) {
+      const sel = document.getElementById('azSubscription');
+      const r = await bm.get('azure-subscriptions');
+      sel.textContent = '';
+      (r.subscriptions || []).forEach((sub) => {
+        const o = document.createElement('option'); o.value = sub.id; o.textContent = `${sub.name} (${sub.id})`;
+        if (sub.id === current) o.selected = true;
+        sel.append(o);
+      });
+    }
+
+    async function loadResearch() {
+      const sel = document.getElementById('bmResearch');
+      const r = await bm.get('research');
+      if (!r.ok) { sel.innerHTML = ''; const o = document.createElement('option'); o.textContent = r.message; sel.append(o); return; }
+      bm.research = r.research;
+      sel.textContent = '';
+      r.research.forEach((f) => {
+        const o = document.createElement('option'); o.value = f.config;
+        o.textContent = `${f.title} \u2014 ${f.scenarios} scenarios, ${f.vms} VMs`;
+        sel.append(o);
+      });
+      showResearchInfo();
+    }
+    function showResearchInfo() {
+      const f = bm.research.find((x) => x.config === document.getElementById('bmResearch').value);
+      bmText('bmResearchInfo', f ? `${f.config}: ${f.description || ''}` : '');
+    }
+    document.getElementById('bmResearch').addEventListener('change', showResearchInfo);
+
+    async function loadRuns() {
+      const table = document.getElementById('bmRuns');
+      const r = await bm.get('runs');
+      table.textContent = '';
+      if (!r.ok || !r.runs.length) { table.insertRow().insertCell().textContent = r.ok ? 'No runs yet.' : r.message; return; }
+      r.runs.forEach((run) => {
+        const tr = table.insertRow();
+        tr.insertCell().textContent = (run.created || '').replace('T', ' ').replace('Z', '');
+        const a = document.createElement('a'); a.href = run.url; a.target = '_blank'; a.rel = 'noopener';
+        a.textContent = run.title; tr.insertCell().append(a);
+        tr.insertCell().textContent = run.conclusion || run.status;
+      });
+    }
+    document.getElementById('bmRunsRefresh').addEventListener('click', (e) => { e.preventDefault(); loadRuns(); });
+
+    document.getElementById('anthropicForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const input = e.target.elements.key;
+      await runAction('Saving the Anthropic API key...', '/api/anthropic-key', {
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: input.value.trim() })
+      }, (res, p) => p.message || (res.ok ? 'Saved.' : 'Error.'));
+      input.value = ''; loadTesting();
+    });
+    document.getElementById('anthropicClearBtn').addEventListener('click', async () => {
+      if (!confirm('Remove the Anthropic API key from the appliance?')) return;
+      await runAction('Removing the Anthropic API key...', '/api/anthropic-key', {
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: '' })
+      }, (res, p) => p.message || 'Done.');
+      loadTesting();
+    });
+    document.getElementById('githubForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const input = e.target.elements.token;
+      await bm.post('github-token', { token: input.value.trim() }, 'Checking the GitHub token...', 'Saved.');
+      input.value = ''; bm.research = []; loadTesting();
+    });
+    document.getElementById('githubClearBtn').addEventListener('click', async () => {
+      if (!confirm('Remove the GitHub token from the appliance?')) return;
+      await bm.post('github-token/clear', {}, 'Removing the GitHub token...', 'Removed.');
+      loadTesting();
+    });
+    document.getElementById('envForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      await bm.post('environment', { name: e.target.elements.name.value, obux_email: e.target.elements.obux_email.value },
+        'Setting up your environment (InfluxDB token, GitHub environment, secrets and variables)...', 'Environment ready.');
+      loadTesting();
+    });
+    document.getElementById('azLoginBtn').addEventListener('click', async () => {
+      await bm.post('azure-login', { tenant: document.getElementById('azTenant').value.trim() }, 'Starting the Azure sign-in...', 'Started.');
+      document.getElementById('azSubscription').textContent = '';
+      setTimeout(loadTesting, 3000);
+    });
+    document.getElementById('azCancelBtn').addEventListener('click', async () => {
+      await bm.post('azure-cancel', {}, 'Stopping...', 'Stopped.'); loadTesting();
+    });
+    document.getElementById('azSetupBtn').addEventListener('click', async () => {
+      const sub = document.getElementById('azSubscription');
+      if (!sub.value) return;
+      if (!confirm(`Run Setup.ps1 in ${sub.options[sub.selectedIndex].text}? It creates a resource group with Terraform state storage, a managed identity with Contributor on the subscription, and sets your environment's Azure variables.`)) return;
+      await bm.post('azure-setup', { subscription: sub.value, location: document.getElementById('azLocation').value.trim() },
+        'Starting Setup.ps1...', 'Started.');
+      setTimeout(loadTesting, 2000);
+    });
+    document.getElementById('bmRunBtn').addEventListener('click', async () => {
+      const config = document.getElementById('bmResearch').value;
+      if (!config) return;
+      const validateOnly = document.getElementById('bmValidateOnly').checked;
+      const f = bm.research.find((x) => x.config === config) || {};
+      if (!validateOnly && !confirm(`Start "${f.title || config}" for real? It deploys ${f.vms || 'several'} Azure VMs across ${f.scenarios || '?'} scenarios in your subscription, which costs money.`)) return;
+      await bm.post('run', { config, validate_only: validateOnly, analyse: document.getElementById('bmAnalyse').checked },
+        validateOnly ? 'Starting a validation run...' : 'Starting the research...', 'Started.');
+      loadRuns();
+    });
+    loadTesting();
 
     // Web ports (nginx): standard 80/443 or alternative 8080/4443.
     async function loadPorts() {

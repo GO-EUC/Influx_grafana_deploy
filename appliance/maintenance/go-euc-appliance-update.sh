@@ -64,6 +64,10 @@ echo "[full-update] Start: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 echo "[full-update] Applying OS updates..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
+# Testing tools (pwsh, az, gh): installs them if first boot couldn't; the upgrade below updates them.
+if [[ -x /usr/local/bin/go-euc-install-test-tools.sh ]]; then
+  /usr/local/bin/go-euc-install-test-tools.sh || echo "[full-update] WARN: Testing tools (pwsh, az, gh) could not be installed." >&2
+fi
 apt-get upgrade -y
 apt-get autoremove -y
 

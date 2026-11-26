@@ -37,6 +37,7 @@ The GO-EUC appliance is a ready-made Ubuntu virtual machine that collects and sh
   | `dl.influxdata.com` | 443 | Telegraf for Windows package download (optional) |
   | `goeucartifacts4hiu9i.blob.core.windows.net` | 443 | dashboard updates (optional) |
   | `acme-v02.api.letsencrypt.org` | 443 | Let's Encrypt certificates (optional) |
+  | `packages.microsoft.com`, `cli.github.com` | 443 | PowerShell, Azure CLI and GitHub CLI for the Testing section (optional: setup continues without them) |
 
   First boot checks the required sites before installing anything. If they aren't reachable, setup stops with a clear message instead of failing halfway (see [Troubleshooting](#8-troubleshooting)).
 

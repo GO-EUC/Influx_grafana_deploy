@@ -254,6 +254,28 @@ def _read_env_file(path):
 
 PUBLIC_URL_CMD = "/usr/local/bin/go-euc-public-url.sh"
 SET_HOSTNAME_CMD = "/usr/local/bin/go-euc-set-hostname.sh"
+BENCHMARKLE_CMD = "/usr/local/bin/go-euc-benchmarkle.py"
+# Testing section (GO-EUC/benchmarkle): GET and POST routes -> go-euc-benchmarkle.py commands.
+BENCHMARKLE_GET = {"status": "status", "research": "research-list", "runs": "runs",
+                   "azure-subscriptions": "azure-subscriptions"}
+BENCHMARKLE_POST = {"github-token": "set-github-token", "github-token/clear": "clear-github-token",
+                    "environment": "setup-environment", "azure-login": "azure-login", "azure-cancel": "azure-cancel",
+                    "azure-setup": "azure-setup", "run": "run-research"}
+
+
+def _benchmarkle(command, payload=b""):
+    """Runs go-euc-benchmarkle.py; secrets only travel on stdin. Returns (http status, json)."""
+    try:
+        result = subprocess.run([BENCHMARKLE_CMD, command], input=payload, capture_output=True, timeout=300)
+    except subprocess.TimeoutExpired:
+        return 504, {"ok": False, "message": "The step took too long."}
+    except OSError as err:
+        return 500, {"ok": False, "message": f"Testing backend unavailable: {err}"}
+    try:
+        body = json.loads(result.stdout.decode("utf-8", "replace") or "{}")
+    except ValueError:
+        return 500, {"ok": False, "message": "Unexpected answer from the Testing backend."}
+    return (200 if body.get("ok") else 400), body
 
 
 def _public_address():
@@ -358,6 +380,10 @@ class GoEucHandler(http.server.SimpleHTTPRequestHandler):
             return
         if urllib.parse.urlsplit(self.path).path == "/api/public-hostname":
             self._send_json(200, _public_hostname_status())
+            return
+        bm_path = urllib.parse.urlsplit(self.path).path
+        if bm_path.startswith("/api/benchmarkle/") and bm_path[len("/api/benchmarkle/"):] in BENCHMARKLE_GET:
+            self._send_json(*_benchmarkle(BENCHMARKLE_GET[bm_path[len("/api/benchmarkle/"):]]))
             return
         if urllib.parse.urlsplit(self.path).path == "/api/proxmox-metric-server":
             self._send_json(200, _proxmox_metric_server(self.headers.get("Host", "")))
@@ -478,6 +504,18 @@ class GoEucHandler(http.server.SimpleHTTPRequestHandler):
             return
         if self.path == "/api/public-hostname":
             self._handle_set_hostname(raw_body)
+            return
+        if self.path.startswith("/api/benchmarkle/") and self.path[len("/api/benchmarkle/"):] in BENCHMARKLE_POST:
+            self._send_json(*_benchmarkle(BENCHMARKLE_POST[self.path[len("/api/benchmarkle/"):]], raw_body))
+            return
+        if self.path == "/api/anthropic-key":
+            try:
+                key = (json.loads(raw_body.decode("utf-8")) if raw_body else {}).get("key", "")
+            except (ValueError, AttributeError):
+                self._send_json(400, {"ok": False, "message": "Invalid JSON payload."})
+                return
+            command = "set-anthropic-key" if str(key).strip() else "clear-anthropic-key"
+            self._send_json(*_benchmarkle(command, raw_body))
             return
 
         route = _match_collector_route(self.path)
